@@ -53,4 +53,4 @@ projection_models:
     - MIROC5
 
 # Topography
-topobase: 'SRTM_SierraConservancy_3310_.tif'
+topobase: 'SRTM_Sierra_Conservancy_EPSG3310.tif'

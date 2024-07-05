@@ -153,7 +153,10 @@ rule topo_features:
     output:
         directory(topo_gen)
     shell:
-        "Rscript r/raster_topography_indexes.r -i {input} -o {output}"
+        """
+        mkdir -p {output}
+        Rscript r/raster_topography_indexes.r -i {input} -o {output}
+        """
 
 
 rule all_projections:
@@ -162,8 +165,7 @@ rule all_projections:
             op.join(projdir, '{model}', '{scenario}{suffix}.nc4'),
             model=config['projection_models'],
             scenario=config['projection_scenarios'],
-            #suffix=['', '_annual', '_indexes'],
-            suffix=['', '_annual'],
+            suffix=['', '_annual', '_indexes'],
         )
 
 
