@@ -4,11 +4,12 @@
   "fontsize": {
     "title": 20
   },
+  "title_format": "GFDL-CM3, RCP 4.5\nYear = {year}",
   "plot_kwargs": {
     "vmin": 0,
-    "vmax": 15,
+    "vmax": 10,
     "cmap": "inferno_r",
-    "alpha": 0.95
+    "alpha": 0.7
   },
   "cbar_kwargs": {
     "extend": "max"
@@ -17,8 +18,12 @@
     "label": "Modeled Tree Mortality (trees/acre)",
     "fontsize": 18
   },
-  "extent": [-125, -117.5, 35, 42.1],
-  "facecolor": "gray",
+  "extent": [-125, -113, 32, 43],
+  "background_kwargs": {
+    "name": "ne2_shaded",
+    "resolution": "high",
+    "extent": [-125, -113, 32, 43]
+  },
   "savefig_kwargs": {
     "dpi": 300
   }

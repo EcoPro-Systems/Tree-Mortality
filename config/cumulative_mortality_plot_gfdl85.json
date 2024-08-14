@@ -4,7 +4,7 @@
   "fontsize": {
     "title": 20
   },
-  "title_format": "GFDL-CM3, RCP 4.5\nYear = {year}",
+  "title_format": "GFDL-CM3, RCP 8.5\nYear = {year}",
   "plot_kwargs": {
     "vmin": 0,
     "vmax": 400,

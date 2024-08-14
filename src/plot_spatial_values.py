@@ -40,6 +40,7 @@ def main(datafile, year, configfile, outputfile):
     plot_kwargs = config.get('plot_kwargs', {})
     cbar_kwargs = config.get('cbar_kwargs', {})
     cbar_label = config['cbar_label']
+    title_fmt = config.get('title_format', 'Year = {year}')
     background_kwargs = config.get('background_kwargs', None)
     facecolor = config.get('facecolor', None)
     savefig_kwargs = config.get('savefig_kwargs', {})
@@ -69,7 +70,8 @@ def main(datafile, year, configfile, outputfile):
         add_colorbar=False,
         **plot_kwargs
     )
-    ax.set_title(f'Year = {year}', fontsize=fontsize['title'])
+    title = title_fmt.format(year=year)
+    ax.set_title(title, fontsize=fontsize['title'])
     ax.coastlines()
     ax.add_feature(cfeature.STATES.with_scale('50m'))
     if background_kwargs is not None:

@@ -1,13 +1,13 @@
 {
-  "value": "cumulative_tpa_projection_median",
+  "value": "tpa_projection_median",
   "figsize": [8, 8],
   "fontsize": {
     "title": 20
   },
-  "title_format": "GFDL-CM3, RCP 4.5\nYear = {year}",
+  "title_format": "GFDL-CM3, RCP 8.5\nYear = {year}",
   "plot_kwargs": {
     "vmin": 0,
-    "vmax": 400,
+    "vmax": 15,
     "cmap": "inferno_r",
     "alpha": 0.7
   },
@@ -15,7 +15,7 @@
     "extend": "max"
   },
   "cbar_label": {
-    "label": "Cumulative Tree Mortality (trees/acre)",
+    "label": "Modeled Tree Mortality (trees/acre)",
     "fontsize": 18
   },
   "extent": [-125, -113, 32, 43],
