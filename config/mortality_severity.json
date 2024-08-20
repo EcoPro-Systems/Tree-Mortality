@@ -1,0 +1,33 @@
+{
+  "projection": "EPSG:3310",
+  "years": [
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2021
+  ],
+  "variables": [
+    {
+      "input": "band_data",
+      "name": "severity_code",
+      "attrs": {
+        "long_name": "Severity Code",
+        "code_1": "Very Light (1-3%)",
+        "code_2": "Light (4-10%)",
+        "code_3": "Moderate (11-29%)",
+        "code_4": "Severe (30-50%)",
+        "code_5": "Very Severe (51-100%)"
+      }
+    }
+  ],
+  "chunks": {
+    "year": -1,
+    "northing": 512,
+    "easting": 512
+  }
+}
