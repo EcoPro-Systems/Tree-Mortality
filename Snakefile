@@ -20,7 +20,7 @@ annual_dataset = op.join(bcmdir, 'BCMv8_annual.zarr')
 index_dataset = op.join(bcmdir, 'BCMv8_indexes.zarr')
 
 # Mortality Files
-def mortfile(base): return op.join(mortdir, 'generated', base)
+def mortfile(base): return op.join(mortdir, 'generated_severity', base)
 
 mort = mortfile('tree_mortality.zarr')
 mort_folds = mortfile('tree_mortality_folds.zarr')
@@ -52,7 +52,7 @@ rule all_training:
 
 rule train_model:
     input:
-        op.join(mortdir, 'generated', '{base}_training.zarr')
+        op.join(mortdir, 'generated_severity', '{base}_training.zarr')
     output:
         op.join(resultsdir, '{base}_loo.npz')
     shell:
@@ -126,13 +126,13 @@ use rule mortality_folds as mortality_random_folds with:
 
 rule mortality:
     input:
-        mortdir
+        os.path.join(mortdir, 'gridRef_treeMortalitySN_Abies_PERC_AFFECTED_CODE_byYear.tif')
     output:
         directory(mort)
     params:
         config['mort_config']
     shell:
-        "python src/convert_tree_mortality.py {input} {params} {output}"
+        "python src/convert_mortality_severity.py {input} {params} {output}"
 
 
 rule topo:
