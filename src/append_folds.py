@@ -17,6 +17,9 @@ def make_folds(ds, grid_size, shuffle=False):
     folds = np.zeros((cols, rows), dtype=int) + cc[..., np.newaxis] + rr
     idx = np.arange(cols * rows, dtype=int).reshape((rows, cols)).T
 
+    eastings = np.zeros((rows, cols), dtype=float) + ds.easting.values
+    northings = (np.zeros((rows, cols), dtype=float).T + ds.northing.values).T
+
     if shuffle:
         np.random.seed(0)
         folds_tmp = folds.ravel()
@@ -38,7 +41,21 @@ def make_folds(ds, grid_size, shuffle=False):
                 {
                     'long_name': 'cell identifier',
                 }
-            )
+            ),
+            'northings': (
+                ['easting', 'northing'],
+                northings.T,
+                {
+                    'long_name': 'northing coordinate',
+                }
+            ),
+            'eastings': (
+                ['easting', 'northing'],
+                eastings.T,
+                {
+                    'long_name': 'easting coordinate',
+                }
+            ),
         },
         coords={
             'easting': ds.easting,

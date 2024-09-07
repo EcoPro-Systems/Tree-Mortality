@@ -1,0 +1,26 @@
+features:
+ - northings
+ - eastings
+ - PR1-1
+ - PRET1-1
+ - SPI1-1
+ - SPI1-2
+ - SPI1-3
+ - SPI1-4
+ - SPI1-5
+ - SPI1-6
+ - SPEI1-1
+ - SPEI1-2
+ - SPEI1-3
+ - SPEI1-4
+ - SPEI1-5
+ - SPEI1-6
+ - elevation
+ - northness
+ - slope
+ - rie
+ - sapa
+ - sdmv
+ - tpi
+ - vrm
+target: severity_code
