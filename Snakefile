@@ -40,6 +40,9 @@ topo_gen = op.join(topodir, 'generated')
 topofile = op.join(topodir, 'topo_indexes.zarr')
 demfile = op.join(topodir, config['topobase'])
 
+# Heat Files
+heatfile = 'data/heat_index_regridded.zarr'
+
 # Result Files
 tm_results = op.join(resultsdir, 'tree_mortality_loo.npz')
 tm_random_results = op.join(resultsdir, 'tree_mortality_random_loo.npz')
@@ -89,7 +92,8 @@ rule mortality_training:
     input:
         mort_folds,
         index_dataset,
-        topofile
+        topofile,
+        heatfile
     output:
         directory(mort_training)
     params:

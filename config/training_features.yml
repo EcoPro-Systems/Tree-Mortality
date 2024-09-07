@@ -12,6 +12,7 @@ features:
     SPEI:
       cumulative: 6
       back: 6
+
   topography:
     - elevation
     - adjsd
@@ -23,7 +24,11 @@ features:
     - tpi
     - vrm
 
-target: tpa
+  heat:
+    fraction_hot_days:
+      back: 6
+
+target: severity_code
 
 years:
  - 2012

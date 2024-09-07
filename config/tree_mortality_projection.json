@@ -1,12 +1,12 @@
 {
   "year_range": {
-    "start": 2025,
+    "start": 2022,
     "end": 2100
   },
-  "prediction_variable": "tpa_projection",
+  "prediction_variable": "mortality_projection",
   "prediction_variable_info": {
-    "long_name": "Projected Tree Mortality Per Acre",
-    "units": "trees / acre"
+    "long_name": "Projected Tree Mortality Fraction",
+    "units": "1"
   },
   "chunks": {
     "easting": 512,

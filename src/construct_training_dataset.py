@@ -27,11 +27,25 @@ def get_climate_features(clim, year, feature_info):
     return features
 
 
-def get_topography_features(topo, feature_info):
-    return [topo[fname] for fname in feature_info]
+def get_heat_features(heat, year, feature_info):
+    features = []
+
+    for fbase, finfo in feature_info.items():
+        for b in range(finfo['back']):
+            hyear = heat.sel(year=(year - b)).assign_coords(year=[year])
+            new_name = f'{fbase}-{b+1}'
+            features.append(
+                hyear[fbase].rename(new_name)
+            )
+
+    return features
 
 
-def to_samples(mort, clim, topo, year, feature_info, target):
+def get_basic_features(basic, feature_info):
+    return [basic[fname] for fname in feature_info]
+
+
+def to_samples(mort, clim, topo, heat, year, feature_info, target):
 
     # Make a new variable to hold copy of the year for each cell
     year_var = mort['id'].copy().rename('year_copy')
@@ -43,10 +57,13 @@ def to_samples(mort, clim, topo, year, feature_info, target):
         year_var,
         mort['id'],
         mort['fold'],
+        mort['northings'],
+        mort['eastings'],
         mort[target].sel(year=year),
     ]
     features += get_climate_features(clim, year, feature_info['climate'])
-    features += get_topography_features(topo, feature_info['topography'])
+    features += get_basic_features(topo, feature_info['topography'])
+    features += get_heat_features(heat, year, feature_info['heat'])
 
     feat_ds = xr.merge(features, join='inner', combine_attrs='drop')
     feat_ds = feat_ds.drop_vars(('year', 'spatial_ref',))
@@ -67,13 +84,16 @@ def to_samples(mort, clim, topo, year, feature_info, target):
 @click.argument('topofile', type=click.Path(
     path_type=Path, exists=True
 ))
+@click.argument('heatfile', type=click.Path(
+    path_type=Path, exists=True
+))
 @click.argument('configfile', type=click.Path(
     path_type=Path, exists=True
 ))
 @click.argument('outputfile', type=click.Path(
     path_type=Path, exists=False
 ))
-def main(mortalityfile, climatefile, topofile, configfile, outputfile):
+def main(mortalityfile, climatefile, topofile, heatfile, configfile, outputfile):
 
     config = load_config(configfile)
 
@@ -85,6 +105,7 @@ def main(mortalityfile, climatefile, topofile, configfile, outputfile):
     mort = xr.open_zarr(mortalityfile)
     clim = xr.open_zarr(climatefile)
     topo = xr.open_zarr(topofile)
+    heat = xr.open_zarr(heatfile)
 
     # Fix coordinate mis-match issue due to rounding
     mort = mort.assign_coords(
@@ -99,10 +120,14 @@ def main(mortalityfile, climatefile, topofile, configfile, outputfile):
         easting=np.round(topo.easting.values, 4),
         northing=np.round(topo.northing.values, 4),
     )
+    heat = heat.assign_coords(
+        easting=np.round(heat.easting.values, 4),
+        northing=np.round(heat.northing.values, 4),
+    )
 
     combined = xr.concat(
         [
-            to_samples(mort, clim, topo, year, finfo, target)
+            to_samples(mort, clim, topo, heat, year, finfo, target)
             for year in tqdm(years, 'Yearly Features')
         ],
         dim='sample', coords='all', compat='identical'
@@ -111,6 +136,9 @@ def main(mortalityfile, climatefile, topofile, configfile, outputfile):
     print(f'Selecting data...')
     good = combined[target].notnull().compute()
     combined = combined.where(good, drop=True)
+    for tf in tqdm(finfo['topography'], 'Excluding missing topography'):
+        good = combined[tf].notnull().compute()
+        combined = combined.where(good, drop=True)
 
     write_job = combined.chunk(chunks).to_zarr(
         outputfile, mode='w', compute=False, consolidated=True

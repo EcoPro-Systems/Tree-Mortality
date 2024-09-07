@@ -1,0 +1,5 @@
+focal_period: [2006, 2021]
+reference_period: [1980, 2005]
+
+mean_threshold: 5.0
+quantile_threshold: 0.9
