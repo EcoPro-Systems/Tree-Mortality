@@ -37,7 +37,7 @@ def main(projectionfile, shapefile, outputfile):
 
     sf = (1.0 - (ds['mortality_projection'] / 100.))
     sf = np.maximum(0.0, np.minimum(1.0, sf))
-    habitat = sf.cumprod(dim='year')
+    habitat = 100. * sf.cumprod(dim='year')
 
     #habitat.rio.write_crs(pstr, inplace=True)
 

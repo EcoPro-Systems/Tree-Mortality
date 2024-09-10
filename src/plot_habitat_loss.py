@@ -96,7 +96,7 @@ def main(datafile, boundaryfile, year, configfile, outputfile):
     except:
         ds_crs = ccrs.PlateCarree()
 
-    var = 100 * ds[value].sel(year=year)
+    var = ds[value].sel(year=year)
 
     # Clip infinite values if needed
     if nan_to_num_kwargs is not None:

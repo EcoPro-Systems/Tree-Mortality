@@ -54,14 +54,36 @@ def merge_features(clim, topo):
     return xr.merge([clim, topo], join='inner', combine_attrs='drop')
 
 
+def posterior_quantile(model, X_good, ranges, quantile):
+
+    assert np.all(model.classes_[:-1] <= model.classes_[1:])
+    ranges = np.array([ranges[c] for c in model.classes_])
+
+    ranges = np.array(ranges)
+    P = model.predict_proba(X_good)
+
+    ps = np.cumsum(P, axis=1)
+    bins = np.array([
+        np.searchsorted(psi, quantile)
+        for psi in ps
+    ])
+    fractions = np.array([
+        (quantile if bi == 0 else quantile - psi[bi - 1]) / pi[bi]
+        for bi, psi, pi in zip(bins, ps, P)
+    ])
+    ri = ranges[bins]
+    return ri[:, 0] + fractions * (ri[:, 1] - ri[:, 0])
+
+
 @ray.remote
-def apply_model(climatefile, topofile, modelfile, year):
+def apply_model(climatefile, topofile, modelfile, year, quantile):
 
     with open(modelfile, 'rb') as f:
         model_info = load(f)
 
     features = model_info['features']
     model = model_info['model']
+    ranges = model_info.get('ranges', None)
 
     with xr.open_zarr(climatefile) as clim:
         with xr.open_zarr(topofile) as topo:
@@ -77,7 +99,11 @@ def apply_model(climatefile, topofile, modelfile, year):
             good = np.logical_not(np.any(np.isnan(X), axis=1))
             X_good = filter_inf(X[good])
 
-            y_good = model.predict(X_good)
+            if ranges is not None:
+                y_good = posterior_quantile(model, X_good, ranges, quantile)
+
+            else:
+                y_good = model.predict(X_good)
 
             y[good] = y_good
             Y = y.reshape(cube.shape[:2])
@@ -101,7 +127,8 @@ def apply_model(climatefile, topofile, modelfile, year):
 @click.argument('outputfile', type=click.Path(
     path_type=Path, exists=False
 ))
-def main(climatefile, topofile, modelfile, configfile, outputfile):
+@click.option('-q', '--quantile', default=0.5)
+def main(climatefile, topofile, modelfile, configfile, outputfile, quantile):
 
     # Load config
     with open(configfile, 'r') as f:
@@ -120,7 +147,7 @@ def main(climatefile, topofile, modelfile, configfile, outputfile):
 
     predictions = np.dstack(ray.get(
         [
-            apply_model.remote(climatefile, topofile, modelfile, year)
+            apply_model.remote(climatefile, topofile, modelfile, year, quantile)
             for year in years
         ]
     ))

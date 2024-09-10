@@ -3,7 +3,7 @@ import click
 import numpy as np
 import xarray as xr
 from pathlib import Path
-from sklearn.ensemble import ExtraTreesRegressor
+from sklearn.ensemble import ExtraTreesRegressor, ExtraTreesClassifier
 from skops.io import dump
 
 
@@ -29,7 +29,8 @@ def filter_zero(X, y):
 @click.argument('modelfile', type=click.Path(
     path_type=Path, exists=False
 ))
-def main(trainingfile, configfile, modelfile):
+@click.option('-c', '--classification', is_flag=True)
+def main(trainingfile, configfile, modelfile, classification):
 
     config = load_config(configfile)
     target = config['target']
@@ -43,18 +44,34 @@ def main(trainingfile, configfile, modelfile):
     Xtrn, ytrn = filter_zero(Xtrn, ytrn)
 
     # Categorical to regresison targets
-    ytrn = MIDPOINTS[ytrn.astype(int)]
+    if classification:
+        ytrn = ytrn.astype(int)
+        model = ExtraTreesClassifier(
+            n_estimators=100, max_depth=5,
+            bootstrap=True, n_jobs=-1,
+        )
 
-    model = ExtraTreesRegressor(
-        n_estimators=100, max_depth=5,
-        bootstrap=True, n_jobs=-1,
-    )
+    else:
+        ytrn = MIDPOINTS[ytrn.astype(int)]
+        model = ExtraTreesRegressor(
+            n_estimators=100, max_depth=5,
+            bootstrap=True, n_jobs=-1,
+        )
+
     model.fit(Xtrn, ytrn)
 
     output = {
         'model': model,
         'features': feature_names,
     }
+    if classification:
+        output['ranges'] = {
+            1: [1, 3],
+            2: [3, 10],
+            3: [10, 30],
+            4: [30, 50],
+            5: [50, 100],
+        }
 
     with open(modelfile, 'wb') as f:
         dump(output, f)
