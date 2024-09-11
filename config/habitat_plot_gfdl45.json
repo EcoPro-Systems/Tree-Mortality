@@ -14,7 +14,7 @@
   "cbar_kwargs": {
   },
   "cbar_label": {
-    "label": "Percent Trees Remaining",
+    "label": "Habitat Suitability",
     "fontsize": 18
   },
   "extent": [-125, -113, 32, 43],

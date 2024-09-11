@@ -106,9 +106,10 @@ def main(datafile, boundaryfile, year, configfile, outputfile):
         )
 
     fig = plt.figure(figsize=figsize)
-    ax_full = plt.subplot(2, 2, (2, 4), projection=plot_crs)
-    ax_y = plt.subplot(2, 2, 1, projection=plot_crs)
-    ax_s = plt.subplot(2, 2, 3, projection=plot_crs)
+    ax_full = plt.subplot2grid((2, 8), (0, 3), rowspan=2, colspan=4, projection=plot_crs)
+    ax_sum = plt.subplot2grid((2, 8), (0, 7), rowspan=2, colspan=1)
+    ax_y = plt.subplot2grid((2, 8), (0, 0), rowspan=1, colspan=3, projection=plot_crs)
+    ax_s = plt.subplot2grid((2, 8), (1, 0), rowspan=1, colspan=3, projection=plot_crs)
     if extent is not None: ax_full.set_extent(extent, crs=ccrs.PlateCarree())
 
     artist = var.plot(
@@ -120,6 +121,16 @@ def main(datafile, boundaryfile, year, configfile, outputfile):
     title = title_fmt.format(year=year)
     fig.suptitle(title, fontsize=fontsize['title'])
     ax_full.set_title(None)
+
+    xmin, ymin = ds_crs.transform_point(-113, 32, ccrs.PlateCarree())
+    xmax, ymax = ds_crs.transform_point(-113, 43, ccrs.PlateCarree())
+    averages = var.mean(dim='easting', skipna=True)
+    ax_sum.barh(var.northing.values, averages.values, height=270.,
+        facecolor='k', edgecolor='none')
+    ax_sum.set_yticks([])
+    ax_sum.set_xlim(0, 100)
+    ax_sum.set_ylim(ymin, ymax)
+    ax_sum.set_xlabel('Habitat Suitability', fontsize=14)
 
     plot_cutout(
         ax_y, ds_crs, plot_crs, plot_kwargs,
