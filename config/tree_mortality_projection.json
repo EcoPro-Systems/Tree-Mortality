@@ -1,6 +1,6 @@
 {
   "year_range": {
-    "start": 2022,
+    "start": 2025,
     "end": 2100
   },
   "prediction_variable": "mortality_projection",

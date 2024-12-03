@@ -134,8 +134,8 @@ def main(datafile, boundaryfile, year, configfile, outputfile):
 
     plot_cutout(
         ax_y, ds_crs, plot_crs, plot_kwargs,
-        var, df, [-120.4, -118.5, 37.35, 38.3],
-        ('Yosemite',), ax_full
+        var, df, [-122.25, -120.25, 40., 41.0],
+        ('Lassen Volcanic',), ax_full
     )
 
     plot_cutout(
