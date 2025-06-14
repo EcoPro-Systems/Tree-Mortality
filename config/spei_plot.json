@@ -22,11 +22,11 @@
     "label": "Standardized Water Balance Index",
     "fontsize": 18
   },
-  "extent": [-125, -113, 32, 43],
+  "extent": [-125, -114, 32, 43],
   "background_kwargs": {
     "name": "ne2_shaded",
     "resolution": "high",
-    "extent": [-125, -113, 32, 43]
+    "extent": [-125, -114, 32, 43]
   },
   "savefig_kwargs": {
     "dpi": 300

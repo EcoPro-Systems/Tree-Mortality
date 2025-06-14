@@ -48,6 +48,11 @@ def get_matrices(years, metrics):
     }
 
 
+def filter_nan(true, pred):
+    good = np.logical_not(np.logical_or(np.isnan(true), np.isnan(pred)))
+    return true[good], pred[good]
+
+
 @click.command()
 @click.argument('resultfile', type=click.Path(
     path_type=Path, exists=True
@@ -67,8 +72,9 @@ def main(resultfile, outputfile):
         for yj, year_j in enumerate(years):
             pred = predictions[yi, yj, :]
             true = targets[yi, yj, :]
+            true, pred = filter_nan(true, pred)
             metrics[year_i, year_j]['r2'] = r2_score(true, pred)
-            if year_i > year_j: metrics[year_i, year_j]['r2'] = -1
+            #if year_i > year_j: metrics[year_i, year_j]['r2'] = -1
             metrics[year_i, year_j]['rmse'] = mse(true, pred, squared=False)
 
     matrices = get_matrices(years, metrics)

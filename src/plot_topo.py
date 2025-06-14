@@ -18,22 +18,17 @@ PIL.Image.MAX_IMAGE_PIXELS = 250000000
 
 
 @click.command()
-@click.argument('datafile', type=click.Path(
-    path_type=Path, exists=True
-))
-@click.argument('year', type=int)
 @click.argument('configfile', type=click.Path(
     path_type=Path, exists=True
 ))
 @click.argument('outputfile', type=click.Path(
     path_type=Path, exists=False
 ))
-def main(datafile, year, configfile, outputfile):
+def main(configfile, outputfile):
 
     with open(configfile, 'r') as f:
         config = json.load(f)
 
-    value = config['value']
     figsize = config['figsize']
     fontsize = config['fontsize']
     extent = config.get('extent', None)
@@ -47,32 +42,6 @@ def main(datafile, year, configfile, outputfile):
     savefig_kwargs = config.get('savefig_kwargs', {})
     nan_to_num_kwargs = config.get('nan_to_num', None)
 
-    ds = xr.open_zarr(datafile)
-    try:
-        ds_crs = ccrs.Projection(ds.rio.crs)
-    except:
-        ds_crs = ccrs.PlateCarree()
-
-    try:
-        var = ds[value].sel(year=year)
-    except KeyError:
-        print(ds)
-        #var = ds[value].sel(easting=slice(-358731, 269527), northing=slice(531299, -429149))
-        var = ds[value].sel(easting=slice(-35000, 10000), northing=slice(40000, -200000))
-        print(var)
-
-    if clip:
-        var = var.where(
-            (var >= plot_kwargs['vmin']) &
-            (var <= plot_kwargs['vmax'])
-        )
-
-    # Clip infinite values if needed
-    if nan_to_num_kwargs is not None:
-        var = xr.apply_ufunc(
-            np.nan_to_num, var.load(),
-            kwargs=nan_to_num_kwargs,
-        )
 
     fig, ax = plt.subplots(
         1, 1,
@@ -80,23 +49,12 @@ def main(datafile, year, configfile, outputfile):
         subplot_kw=dict(projection=ccrs.Mercator())
     )
     if extent is not None: ax.set_extent(extent, crs=ccrs.PlateCarree())
-    artist = var.plot(
-        ax=ax,
-        transform=ds_crs,
-        add_colorbar=False,
-        **plot_kwargs
-    )
-    title = title_fmt.format(year=year)
-    ax.set_title(title, fontsize=fontsize['title'])
     ax.coastlines()
     ax.add_feature(cfeature.STATES.with_scale('50m'))
     if background_kwargs is not None:
         ax.background_img(**background_kwargs)
     if facecolor is not None:
         ax.set_facecolor(facecolor)
-
-    cbar = fig.colorbar(artist, **cbar_kwargs)
-    cbar.set_label(**cbar_label)
 
     fig.savefig(outputfile, **savefig_kwargs)
 

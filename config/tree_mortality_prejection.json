@@ -1,0 +1,16 @@
+{
+  "year_range": {
+    "start": 2012,
+    "end": 2021
+  },
+  "prediction_variable": "tpa_projection",
+  "prediction_variable_info": {
+    "long_name": "Projected Tree Mortality Per Acre",
+    "units": "trees / acre"
+  },
+  "chunks": {
+    "easting": 512,
+    "northing": 512,
+    "year": 40
+  }
+}

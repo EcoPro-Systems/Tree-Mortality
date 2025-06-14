@@ -1,29 +1,29 @@
 {
-  "value": "SPI1",
-  "figsize": [8, 8],
+  "figsize": [15, 8],
   "fontsize": {
     "title": 20
   },
+  "title_format": "GFDL-CM3, RCP 4.5\nYear = {year}",
   "plot_kwargs": {
-    "vmin": -3,
-    "vmax": 3,
-    "cmap": "RdBu",
-    "alpha": 0.7
+    "vmin": 0.0,
+    "vmax": 100.0,
+    "cmap": "RdYlGn",
+    "alpha": 1.0
   },
   "cbar_kwargs": {
-    "extend": "both"
   },
   "cbar_label": {
-    "label": "Standardized Precipitation Index",
+    "label": "Percent Trees Remaining",
     "fontsize": 18
   },
   "extent": [-125, -114, 32, 43],
   "background_kwargs": {
-    "name": "ne2_shaded",
+    "name": "ne2_gray",
     "resolution": "high",
     "extent": [-125, -114, 32, 43]
   },
   "savefig_kwargs": {
-    "dpi": 300
+    "dpi": 300,
+    "bbox_inches": "tight"
   }
 }

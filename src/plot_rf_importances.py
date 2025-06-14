@@ -26,10 +26,16 @@ def get_parts(fname):
 
 
 def get_matrices(feature_names, importances):
+    print(importances)
+    print(feature_names)
     mapping = {}
+    others = {}
     for f, i in zip(feature_names, importances):
-        idx, cm, lag = get_parts(f)
-        mapping[idx, cm, lag] = i
+        try:
+            idx, cm, lag = get_parts(f)
+            mapping[idx, cm, lag] = i
+        except ValueError:
+            others[f] = i
 
     idxs = sorted(set([i for i, _, _ in mapping.keys()]))
     cms = sorted(set([c for _, c, _ in mapping.keys()]))
@@ -42,7 +48,7 @@ def get_matrices(feature_names, importances):
         li = lags.index(l)
         I[ii, ci, li] = mapping[i, c, l]
 
-    return I, idxs, cms, lags
+    return I, idxs, cms, lags, others
 
 
 @click.command()
@@ -65,7 +71,7 @@ def main(resultfile, outputfile, year):
         importances = np.median(imp[year_idx], axis=0)
     fnames = results['feature_names']
 
-    I, idxs, cms, lags = get_matrices(fnames, importances)
+    I, idxs, cms, lags, others = get_matrices(fnames, importances)
 
     if cms != lags:
         raise NotImplementedError(f'Cumulative years must equal lag years')
@@ -94,9 +100,21 @@ def main(resultfile, outputfile, year):
         ax.set_ylabel('Feature Cumulative Years', fontsize=15)
         ax.set_title(idx.upper(), fontsize=18)
 
+    if len(others) > 0:
+        fig = plt.figure(figsize=(5, 4.5))
+        figs.append(fig)
+        ax = fig.add_subplot(111)
+        x = np.arange(len(others))
+        names = sorted(others.keys())
+        values = [others[n] for n in names]
+        ax.bar(x, values)
+        ax.set_xticks(x, names, rotation=45)
+        ax.set_yscale('log')
+        ax.set_ylim(vmin, vmax)
+
     with PdfPages(outputfile) as pdf:
         for fig in figs:
-            pdf.savefig(fig)
+            pdf.savefig(fig, bbox_inches='tight')
 
 
 if __name__ == '__main__':

@@ -11,3 +11,4 @@
 *.zarr
 figs
 .snakemake
+*.png

@@ -1,20 +1,20 @@
 {
-  "value": "SPI1",
+  "value": "fraction_hot_days",
   "figsize": [8, 8],
   "fontsize": {
     "title": 20
   },
   "plot_kwargs": {
-    "vmin": -3,
-    "vmax": 3,
-    "cmap": "RdBu",
+    "vmin": 0.0,
+    "vmax": 0.25,
+    "cmap": "magma",
     "alpha": 0.7
   },
   "cbar_kwargs": {
-    "extend": "both"
+    "extend": "max"
   },
   "cbar_label": {
-    "label": "Standardized Precipitation Index",
+    "label": "Fraction Hot Days",
     "fontsize": 18
   },
   "extent": [-125, -114, 32, 43],

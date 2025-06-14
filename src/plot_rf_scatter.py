@@ -9,6 +9,8 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
+from plot_performance_matrix import filter_nan
+
 
 @click.command()
 @click.argument('resultfile', type=click.Path(
@@ -27,8 +29,9 @@ def main(resultfile, outputfile):
 
     figs = []
     for yi, year_i in tqdm(list(enumerate(years)), 'Plotting'):
-        pred = predictions[yi, yi, ::1000]
-        true = targets[yi, yi, ::1000]
+        pred = predictions[yi, yi, :]
+        true = targets[yi, yi, :]
+        true, pred = filter_nan(true, pred)
         lim = max(np.max(pred), np.max(true))
         lmin = -0.05 * lim
         lmax = 1.05 * lim
