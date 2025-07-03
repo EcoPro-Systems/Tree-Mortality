@@ -1,0 +1,29 @@
+{
+  "value": "mortality_projection",
+  "figsize": [8, 8],
+  "fontsize": {
+    "title": 20
+  },
+  "title_format": "Habitat Suitability Below {pc:.0f}%",
+  "plot_kwargs": {
+    "vmin": 2075,
+    "vmax": 2100,
+    "cmap": "RdYlGn",
+    "alpha": 1.0
+  },
+  "cbar_kwargs": {
+  },
+  "cbar_label": {
+    "label": "Date of Habitat Suitability Loss",
+    "fontsize": 18
+  },
+  "extent": [-125, -113, 32, 43],
+  "background_kwargs": {
+    "name": "ne2_gray",
+    "resolution": "high",
+    "extent": [-125, -113, 32, 43]
+  },
+  "savefig_kwargs": {
+    "dpi": 300
+  }
+}
