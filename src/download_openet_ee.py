@@ -1,18 +1,33 @@
 #!/usr/bin/env python
+import os
 import ee
 import geemap
 import click
 import requests
 import zipfile
 import io
+import pandas as pd
 from pathlib import Path
 
 
+def month_ranges(start_year, end_year):
+    # Generate a range of month starts
+    dates = pd.date_range(f'{start_year}-01-01', f'{end_year}-12-31', freq='MS')
+    
+    # For each start, compute the end of the month
+    ranges = []
+    for start in dates:
+        end = start + pd.offsets.MonthEnd(1)
+        ranges.append((start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')))
+    
+    return ranges
+
+
 @click.command()
-#@click.argument('geomfile', type=click.Path(
-#    path_type=Path, exists=True
-#))
-def main():
+@click.argument('outputdir', type=click.Path(
+    path_type=Path, exists=True
+))
+def main(outputdir):
 
     # Initialize the Earth Engine module.
     ee.Initialize(project='ecopro-1')
@@ -22,44 +37,24 @@ def main():
         -119.22154524430786, 39.549058861605445,
     )
 
-    # Load the dataset
-    dataset = (
-        ee.ImageCollection('OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0')
-        .filterDate('2011-02-01', '2011-02-02')
-        .select('et_ensemble_mad')
-        .mosaic()
-        .clip(bbox)
-    )
+    ranges = month_ranges(2017, 2017)
 
-    geemap.download_ee_image(
-        dataset, filename='et_tile_01b.tif', scale=30, region=bbox,
-    )
-    exit()
+    for start, end in ranges:
+        print(start)
 
-    
-    ## Rename bands with their date
-    #def rename_band(img):
-    #    return img.rename([img.date().format("YYYYMM")])
+        # Load the dataset
+        dataset = (
+            ee.ImageCollection('OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0')
+            .filterDate(start, end)
+            .select('et_ensemble_mad')
+            .mosaic()
+            .clip(bbox)
+        )
 
-    #et_image = dataset.map(rename_band).toBands()
-    #et_image = dataset.toBands()
-
-    # Request a download URL from EE
-    task_url = dataset.getDownloadURL({
-        "scale": 270,       # GRIDMET native scale ~4 km
-        "region": bbox,
-        "format": "GEO_TIFF"
-    })
-    print(task_url)
-    exit()
-
-    # Download the file (EE gives a .zip of GeoTIFFs if many bands)
-    response = requests.get(task_url)
-    print(response)
-    exit()
-    with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-        # Extract everything locally
-        z.extractall("gee_download")
+        ofile = os.path.join(outputdir, f'et_{start}.tif')
+        geemap.download_ee_image(
+            dataset, filename=ofile, scale=30, region=bbox,
+        )
 
 
 if __name__ == '__main__':
