@@ -1,0 +1,12 @@
+features:
+ - northings
+ - eastings
+
+ - PR3-2
+ - PRET1-3
+ - SPI1-3
+ - SPEI2-3
+
+ - elevation
+
+target: severity_code
