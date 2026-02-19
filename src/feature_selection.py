@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import ray
 import json
 import click
 import warnings
@@ -19,65 +20,121 @@ from train_rf_model_ray import filter_inf
 from util import load_config
 
 
-def rank_features_forward_greedy(
-        X, y, groups, param_distributions, n_iter=10, n_folds=5, random_state=42):
+@ray.remote
+def evaluate_feature(
+    feat,
+    selected,
+    X,
+    y,
+    groups,
+    param_distributions,
+    n_iter,
+    n_folds,
+    random_state,
+):
     """
-    Greedy forward feature selection with GroupKFold CV.
+    Evaluate one candidate feature in parallel.
+    Returns (feature_name, best_score).
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="y_pred contains classes not in y_true",
+            category=UserWarning,
+        )
 
-    Starts with no features and adds the best feature one-by-one.
+        cv = GroupKFold(n_splits=n_folds)
+
+        base_model = ExtraTreesClassifier(
+            random_state=random_state,
+            bootstrap=True,
+        )
+
+        current_feats = selected + [feat]
+        X_sub = X[current_feats]
+
+        rs = RandomizedSearchCV(
+            base_model,
+            param_distributions=param_distributions,
+            n_iter=n_iter,
+            scoring="balanced_accuracy",
+            cv=cv,
+            n_jobs=1,
+            random_state=random_state,
+        )
+
+        rs.fit(X_sub, y, groups=groups)
+
+        return feat, rs.best_score_
+
+
+def rank_features_forward_greedy_ray(
+    X,
+    y,
+    groups,
+    param_distributions,
+    n_iter=10,
+    n_folds=5,
+    random_state=42,
+):
+    """
+    Ray-parallel greedy forward feature selection.
 
     Returns
     -------
     ranked_features : list[int]
-        Feature indices ordered from most to least important
-    r2_scores : list[tuple[int, float]]
-        (n_features_selected, mean CV R²) at each step
+    ba_scores : list[float]
     """
+
+    if not ray.is_initialized():
+        ray.init(ignore_reinit_error=True)
+
     X = pd.DataFrame(X)
-    n_features = X.shape[1]
     feature_names = list(X.columns)
-
-    cv = GroupKFold(n_splits=n_folds)
-
-    base_model = ExtraTreesClassifier(random_state=random_state, bootstrap=True)
 
     remaining = set(feature_names)
     selected = []
     ranked_features = []
     ba_scores = []
 
+    # Put large objects once in Ray object store
+    X_ref = ray.put(X)
+    y_ref = ray.put(y)
+    groups_ref = ray.put(groups)
+
     while remaining:
-        best_feat = None
-        best_score = -np.inf
-
-        for feat in tqdm(remaining):
-            current_feats = selected + [feat]
-            X_sub = X[current_feats]
-
-            rs = RandomizedSearchCV(
-                base_model,
-                param_distributions=param_distributions,
-                n_iter=n_iter,
-                scoring="balanced_accuracy",
-                cv=cv,
-                n_jobs=-1,
-                random_state=random_state,
+        # Launch parallel jobs for all candidate features
+        futures = [
+            evaluate_feature.remote(
+                feat,
+                selected,
+                X_ref,
+                y_ref,
+                groups_ref,
+                param_distributions,
+                n_iter,
+                n_folds,
+                random_state,
             )
-            rs.fit(X_sub, y, groups=groups)
-            score = rs.best_score_
+            for feat in remaining
+        ]
 
-            if score > best_score:
-                best_score = score
-                best_feat = feat
+        # Gather results
+        results = ray.get(futures)
 
-        # Commit the best feature
+        # Find best feature
+        best_feat, best_score = max(results, key=lambda x: x[1])
+
+        # Commit feature
         selected.append(best_feat)
         remaining.remove(best_feat)
 
         ranked_features.append(best_feat)
         ba_scores.append(best_score)
 
-    # Convert feature names → indices
+        print(f"Selected: {best_feat} | BA: {best_score:.4f}")
+
+    # Convert names → indices
     name_to_idx = {name: i for i, name in enumerate(X.columns)}
     ranked_indices = [name_to_idx[f] for f in ranked_features]
 
@@ -126,7 +183,7 @@ def main(trainingfile, configfile, scorefile):
             message="y_pred contains classes not in y_true",
             category=UserWarning,
         )
-        ranked_idx, scores = rank_features_forward_greedy(
+        ranked_idx, scores = rank_features_forward_greedy_ray(
             Xtrn, ytrn, years, param_distributions,
             n_iter=16, n_folds=k, random_state=42
         )
