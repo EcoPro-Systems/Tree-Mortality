@@ -20,7 +20,7 @@ from train_rf_model_ray import filter_inf
 from util import load_config
 
 
-@ray.remote
+@ray.remote(num_cpus=16)
 def evaluate_feature(
     feat,
     selected,
@@ -42,6 +42,12 @@ def evaluate_feature(
             message="y_pred contains classes not in y_true",
             category=UserWarning,
         )
+        warnings.filterwarnings(
+            "ignore",
+            message="A worker stopped while some jobs were given to the executor.",
+            module="joblib.externals.loky.process_executor",
+        )
+
 
         cv = GroupKFold(n_splits=n_folds)
 
@@ -59,7 +65,7 @@ def evaluate_feature(
             n_iter=n_iter,
             scoring="balanced_accuracy",
             cv=cv,
-            n_jobs=1,
+            n_jobs=16,
             random_state=random_state,
         )
 
