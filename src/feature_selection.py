@@ -74,14 +74,28 @@ def evaluate_feature(
         return feat, rs.best_score_
 
 
+def save_ranks(scorefile, ranked_features, scores):
+    if scorefile is None: return
+
+    results = {
+        'ranked_features': ranked_features,
+        'scores': scores,
+    }
+
+    with open(scorefile, 'w') as f:
+        json.dump(results, f, indent=2)
+
+
 def rank_features_forward_greedy_ray(
     X,
     y,
     groups,
+    feature_names,
     param_distributions,
     n_iter=10,
     n_folds=5,
     random_state=42,
+    scorefile=None,
 ):
     """
     Ray-parallel greedy forward feature selection.
@@ -96,9 +110,10 @@ def rank_features_forward_greedy_ray(
         ray.init(ignore_reinit_error=True)
 
     X = pd.DataFrame(X)
-    feature_names = list(X.columns)
+    column_names = list(X.columns)
+    name_to_idx = {name: i for i, name in enumerate(X.columns)}
 
-    remaining = set(feature_names)
+    remaining = set(column_names)
     selected = []
     ranked_features = []
     ba_scores = []
@@ -135,16 +150,25 @@ def rank_features_forward_greedy_ray(
         selected.append(best_feat)
         remaining.remove(best_feat)
 
-        ranked_features.append(best_feat)
+        best_feat_name = feature_names[name_to_idx[best_feat]]
+        ranked_features.append(best_feat_name)
         ba_scores.append(best_score)
 
-        print(f"Selected: {best_feat} | BA: {best_score:.4f}")
+        save_ranks(scorefile, ranked_features, ba_scores)
 
-    # Convert names → indices
-    name_to_idx = {name: i for i, name in enumerate(X.columns)}
-    ranked_indices = [name_to_idx[f] for f in ranked_features]
+        print(f"Selected: {best_feat_name} | BA: {best_score:.4f}")
 
-    return ranked_indices, ba_scores
+    return ranked_features, ba_scores
+
+
+def target_remap(trn, remap):
+    if remap is None:
+        return trn
+
+    return np.array([
+        remap.get(i, i)
+        for i in trn.astype(int)
+    ])
 
 
 @click.command()
@@ -161,13 +185,15 @@ def main(trainingfile, configfile, scorefile):
 
     config = load_config(configfile)
     target = config['target']
+    remap = config.get('target_remap', None)
     feature_names = config['features']
     feature_names = feature_names
 
     ds = xr.open_zarr(trainingfile)
 
     years = ds['year'].values
-    ytrn = ds[target].as_numpy()
+    ytrn = ds[target].to_numpy()
+    ytrn = target_remap(ytrn, remap)
     Xtrn = ds[feature_names].to_array().T
     Xtrn, ytrn = filter_inf(Xtrn, ytrn)
 
@@ -189,21 +215,13 @@ def main(trainingfile, configfile, scorefile):
             message="y_pred contains classes not in y_true",
             category=UserWarning,
         )
-        ranked_idx, scores = rank_features_forward_greedy_ray(
-            Xtrn, ytrn, years, param_distributions,
-            n_iter=16, n_folds=k, random_state=42
+        ranked_features, scores = rank_features_forward_greedy_ray(
+            Xtrn, ytrn, years, feature_names, param_distributions,
+            n_iter=16, n_folds=k, random_state=42,
+            scorefile=scorefile,
         )
 
-    ranked_features = [feature_names[i] for i in ranked_idx]
-
-    results = {
-        'ranked_features': ranked_features,
-        'scores': scores,
-    }
-    print(results)
-
-    with open(scorefile, 'w') as f:
-        json.dump(results, f, indent=2)
+    save_ranks(scorefile, ranked_features, scores)
 
 
 if __name__ == '__main__':
