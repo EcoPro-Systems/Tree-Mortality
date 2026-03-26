@@ -101,18 +101,34 @@ def apply_mask(dataset, region_df):
 
 
 # ---------------------------------------------------------------------------
+# Inf filtering  (identical to feature_embeddings_kernel.py)
+# ---------------------------------------------------------------------------
+
+def filter_inf(X, fill=4):
+    """Replace ±inf with ±fill; raise if NaNs are present."""
+    if np.any(np.isnan(X)):
+        raise ValueError('NaN entries present in feature array')
+    return np.nan_to_num(X, neginf=-fill, posinf=fill)
+
+
+# ---------------------------------------------------------------------------
 # Spatial-mean timeseries extraction
 # ---------------------------------------------------------------------------
 
 def spatial_mean_timeseries(ds_masked, feature_name, years):
     """
     Return arrays (valid_years, means) for *feature_name* over *years*.
+    ±inf values are clamped via filter_inf() before averaging.
     NaN pixels (outside mask) are excluded from the mean.
     """
     valid_years, means = [], []
     for year in years:
         try:
-            arr = get_feature(ds_masked, year, feature_name)
+            arr = get_feature(ds_masked, year, feature_name).astype(float)
+            # Replace ±inf before averaging; NaNs are handled by nanmean below
+            finite_mask = np.isfinite(arr)
+            if finite_mask.any():
+                arr[finite_mask] = filter_inf(arr[finite_mask])
             mean_val = np.nanmean(arr)
             if np.isfinite(mean_val):
                 valid_years.append(year)
