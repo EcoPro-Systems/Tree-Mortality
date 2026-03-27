@@ -125,10 +125,13 @@ def spatial_mean_timeseries(ds_masked, feature_name, years):
     for year in years:
         try:
             arr = get_feature(ds_masked, year, feature_name).astype(float)
-            # Replace ±inf before averaging; NaNs are handled by nanmean below
-            finite_mask = np.isfinite(arr)
-            if finite_mask.any():
-                arr[finite_mask] = filter_inf(arr[finite_mask])
+            # Check for all-NaN before doing anything (nanmean on all-NaN warns)
+            if np.all(np.isnan(arr)):
+                print(f'  Warning: no valid pixels for {feature_name} year {year}, skipping.')
+                continue
+            # Clamp ±inf across the whole array, preserving NaNs so nanmean
+            # can still skip masked pixels correctly
+            arr = np.where(np.isnan(arr), np.nan, np.nan_to_num(arr, neginf=-4, posinf=4))
             mean_val = np.nanmean(arr)
             if np.isfinite(mean_val):
                 valid_years.append(year)
@@ -160,8 +163,9 @@ def main(climatefile, projfile1, projfile2, firfile, configfile, outputfile):
     # ------------------------------------------------------------------
     config = load_config(configfile)
     feature_names = config['features']
-    proj_year_range = config['projection_years']
-    proj_years = list(range(proj_year_range['start'], proj_year_range['end'] + 1))
+    # projection_years from config is no longer used to gate which years are
+    # plotted — we query all years available in each zarr directly, so that
+    # projection series overlap with the historical period where applicable.
 
     # ------------------------------------------------------------------
     # 2. Load fir-tree region mask
@@ -177,7 +181,26 @@ def main(climatefile, projfile1, projfile2, firfile, configfile, outputfile):
     ds_proj1 = apply_mask(xr.open_zarr(projfile1),   region_df)
     ds_proj2 = apply_mask(xr.open_zarr(projfile2),   region_df)
 
-    hist_years = sorted(int(y) for y in np.unique(ds_hist['year'].values))
+    # Use ALL years present in each zarr — this ensures projection series are
+    # plotted over the historical period too, so the overlap is visible.
+    hist_years  = sorted(int(y) for y in np.unique(ds_hist['year'].values))
+    proj1_years = sorted(int(y) for y in np.unique(ds_proj1['year'].values))
+    proj2_years = sorted(int(y) for y in np.unique(ds_proj2['year'].values))
+
+    # Determine the minimum computable year for each dataset.
+    # A feature like "SPEI6-6" requires (year - 6) to exist in the dataset,
+    # so we skip any year where (year - MAX_BACK) is not present.
+    # MAX_BACK = 6 covers the longest possible lag + accumulation window.
+    MAX_BACK = 6
+
+    def safe_years(all_years):
+        """Return only years where (year - MAX_BACK) is also in the dataset."""
+        year_set = set(all_years)
+        return [y for y in all_years if (y - MAX_BACK) in year_set]
+
+    hist_years  = safe_years(hist_years)
+    proj1_years = safe_years(proj1_years)
+    proj2_years = safe_years(proj2_years)
 
     # ------------------------------------------------------------------
     # 4. Build PDF — one page per feature
@@ -188,8 +211,8 @@ def main(climatefile, projfile1, projfile2, firfile, configfile, outputfile):
             print(f'\n  Processing feature: {feature}')
 
             hist_yrs,  hist_vals  = spatial_mean_timeseries(ds_hist,  feature, hist_years)
-            proj1_yrs, proj1_vals = spatial_mean_timeseries(ds_proj1, feature, proj_years)
-            proj2_yrs, proj2_vals = spatial_mean_timeseries(ds_proj2, feature, proj_years)
+            proj1_yrs, proj1_vals = spatial_mean_timeseries(ds_proj1, feature, proj1_years)
+            proj2_yrs, proj2_vals = spatial_mean_timeseries(ds_proj2, feature, proj2_years)
 
             fig, ax = plt.subplots(figsize=(16, 5))
 
@@ -202,7 +225,7 @@ def main(climatefile, projfile1, projfile2, firfile, configfile, outputfile):
             x_min, x_max = int(all_years.min()), int(all_years.max())
 
             # Shade the historical period for context
-            hist_end = hist_yrs[-1] if len(hist_yrs) else proj_years[0]
+            hist_end = hist_yrs[-1] if len(hist_yrs) else x_min
             ax.axvspan(x_min, hist_end, color='lightgrey', alpha=0.35,
                        label='Historical period')
 
@@ -219,8 +242,10 @@ def main(climatefile, projfile1, projfile2, firfile, configfile, outputfile):
                 ax.plot(hist_yrs, hist_vals, '-', color='black', lw=2.0,
                         label='Historical')
 
-            # Vertical line marking start of projections
-            ax.axvline(proj_years[0], color='grey', lw=0.8, ls='-')
+            # Vertical line marking the start of the projection period
+            proj_start = proj1_yrs[0] if len(proj1_yrs) else proj2_yrs[0] if len(proj2_yrs) else None
+            if proj_start is not None:
+                ax.axvline(proj_start, color='grey', lw=0.8, ls='-')
 
             ax.set_title(f'{feature}', fontsize=20)
             ax.set_xlim(x_min, x_max)
