@@ -9,12 +9,12 @@ YAML config file.  Each page shows:
     projection zarrs, so that the overlap with the historical period is visible.
 
 Features are resolved using the same get_feature() pattern as
-feature_embeddings_kernel.py (e.g. "SPEI5-6" → base variable "SPEI5", lagged
+feature_embeddings_kernel.py (e.g. "SPEI5-6" -> base variable "SPEI5", lagged
 6 years back).  Spatial averaging is restricted to pixels inside the fir-tree
 region defined by FIRFILE.
 
 Usage:
-    python plot_index_timeseries.py \\
+    python plot_index_timeseries.py \
         CLIMATEFILE PROJFILE1 PROJFILE2 FIRFILE CONFIGFILE OUTPUTFILE
 
 Arguments:
@@ -31,7 +31,7 @@ import re
 import click
 import numpy as np
 import xarray as xr
-import rioxarray  # noqa: F401  – required for .rio accessor
+import rioxarray  # noqa: F401  - required for .rio accessor
 import geopandas as gpd
 from pathlib import Path
 from tqdm import tqdm
@@ -55,7 +55,7 @@ def load_config(configfile):
 
 def get_feature(merged, year, feature_name):
     """
-    Extract a 2-D (northing × easting) numpy array for *feature_name* at *year*
+    Extract a 2-D (northing x easting) numpy array for *feature_name* at *year*
     from a merged climate/topo dataset.
 
     Handles three feature name patterns:
@@ -105,7 +105,7 @@ def apply_mask(dataset, region_df):
 # ---------------------------------------------------------------------------
 
 def filter_inf(X, fill=4):
-    """Replace ±inf with ±fill; raise if NaNs are present."""
+    """Replace +-inf with +-fill; raise if NaNs are present."""
     if np.any(np.isnan(X)):
         raise ValueError('NaN entries present in feature array')
     return np.nan_to_num(X, neginf=-fill, posinf=fill)
@@ -118,7 +118,7 @@ def filter_inf(X, fill=4):
 def spatial_mean_timeseries(ds_masked, feature_name, years):
     """
     Return arrays (valid_years, means) for *feature_name* over *years*.
-    ±inf values are clamped via filter_inf() before averaging.
+    +-inf values are clamped before averaging.
     NaN pixels (outside mask) are excluded from the mean.
     """
     valid_years, means = [], []
@@ -129,7 +129,7 @@ def spatial_mean_timeseries(ds_masked, feature_name, years):
             if np.all(np.isnan(arr)):
                 print(f'  Warning: no valid pixels for {feature_name} year {year}, skipping.')
                 continue
-            # Clamp ±inf across the whole array, preserving NaNs so nanmean
+            # Clamp +-inf across the whole array, preserving NaNs so nanmean
             # can still skip masked pixels correctly
             arr = np.where(np.isnan(arr), np.nan, np.nan_to_num(arr, neginf=-4, posinf=4))
             mean_val = np.nanmean(arr)
@@ -224,35 +224,55 @@ def main(climatefile, projfile1, projfile2, firfile, configfile, outputfile):
                 continue
             x_min, x_max = int(all_years.min()), int(all_years.max())
 
-            # Shade the historical period for context
+            # Shade the historical period for context; capture handle for
+            # manual legend ordering below.
             hist_end = hist_yrs[-1] if len(hist_yrs) else x_min
-            ax.axvspan(x_min, hist_end, color='lightgrey', alpha=0.35,
-                       label='Historical period')
+            h_span = ax.axvspan(x_min, hist_end, color='lightgrey', alpha=0.35)
 
-            # Plot projection scenarios first (so historical sits on top)
-            if len(proj2_yrs):
-                ax.plot(proj2_yrs, proj2_vals, ':', color='red',   lw=1.8,
-                        label='RCP 8.5')
-            if len(proj1_yrs):
-                ax.plot(proj1_yrs, proj1_vals, '--', color='steelblue', lw=1.8,
-                        label='RCP 4.5')
+            # Plot projection scenarios first (so historical sits on top).
+            h_proj1 = ax.plot(proj1_yrs, proj1_vals, '--', color='steelblue', lw=1.8,
+                              label='RCP 4.5')[0] if len(proj1_yrs) else None
+            h_proj2 = ax.plot(proj2_yrs, proj2_vals, ':', color='red', lw=1.8,
+                              label='RCP 8.5')[0] if len(proj2_yrs) else None
 
-            # Historical on top as solid black
-            if len(hist_yrs):
-                ax.plot(hist_yrs, hist_vals, '-', color='black', lw=2.0,
-                        label='Historical')
+            # Historical on top as solid black.
+            h_hist = ax.plot(hist_yrs, hist_vals, '-', color='black', lw=2.0,
+                             label='Historical')[0] if len(hist_yrs) else None
 
-            # Vertical line marking the start of the projection period
-            proj_start = proj1_yrs[0] if len(proj1_yrs) else proj2_yrs[0] if len(proj2_yrs) else None
+            # Vertical line marking the start of the projection period.
+            proj_start = (proj1_yrs[0] if len(proj1_yrs)
+                          else proj2_yrs[0] if len(proj2_yrs) else None)
             if proj_start is not None:
                 ax.axvline(proj_start, color='grey', lw=0.8, ls='-')
+
+            # Legend order (2 columns):
+            #   row 1: Historical period | Historical
+            #   row 2: RCP 4.5          | RCP 8.5
+            legend_handles, legend_labels = [], []
+            for h, lbl in [
+                (h_span,  'Historical Period'),
+                (h_hist,  'Historical'),
+                (h_proj1, 'RCP 4.5'),
+                (h_proj2, 'RCP 8.5'),
+            ]:
+                if h is not None:
+                    legend_handles.append(h)
+                    legend_labels.append(lbl)
+            ax.legend(legend_handles, legend_labels,
+                      loc='upper right', fontsize=13, ncol=2)
 
             ax.set_title(f'{feature}', fontsize=20)
             ax.set_xlim(x_min, x_max)
             ax.set_ylabel(feature, fontsize=16)
             ax.set_xlabel('Year', fontsize=16)
-            ax.legend(loc='upper right', fontsize=13, ncol=3)
             ax.tick_params(labelsize=13)
+
+            # Symmetric y-axis for standardised indices whose names start with
+            # "SP" (e.g. SPEI, SPI).  Limits become +/- max(|ymin|, |ymax|).
+            if feature.upper().startswith('SP'):
+                ymin, ymax = ax.get_ylim()
+                ylim = max(abs(ymin), abs(ymax))
+                ax.set_ylim(-ylim, ylim)
 
             fig.tight_layout()
             pdf.savefig(fig)
