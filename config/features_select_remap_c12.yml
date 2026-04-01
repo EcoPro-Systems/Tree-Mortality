@@ -1,0 +1,36 @@
+features:
+ - eastings
+ - PRET6-1
+ - PR6-1
+ - SPEI5-6
+ - northness
+ - SPI5-6
+ - PRET6-4
+ - tpi
+ - sdmv
+ - slope
+ - PRET6-2
+ - northings
+ - elevation
+ - SPEI6-4
+
+target: severity_code
+
+target_remap:
+  1: 1
+  2: 1
+  3: 2
+  4: 3
+  5: 3
+
+years:
+ - 2012
+ - 2013
+ - 2014
+ - 2015
+ - 2016
+ - 2017
+ - 2018
+ - 2019
+ - 2022
+ - 2023

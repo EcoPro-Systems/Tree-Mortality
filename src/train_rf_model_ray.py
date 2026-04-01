@@ -7,6 +7,7 @@ from tqdm import tqdm
 from pathlib import Path
 from collections import defaultdict
 from itertools import product
+from scipy.stats import randint, uniform
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error as mse, r2_score
 
