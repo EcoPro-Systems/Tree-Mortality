@@ -92,6 +92,51 @@ about 4 MB/s total at first, then about 0.6 MB/s after about 80 GB.
   `curl -r 0-52428799 -w '%{speed_download}'`. For reference, 0.5 MB/s
   per stream was the healthy rate here.
 
+## Faster: windowed chips, preferably via Google Earth Engine
+
+For analyses that only need NAIP around specific locations (validation
+trees, labeled sites), fetch **chips** instead of whole quarter-quads. Two
+scripts take the same arguments and write identical chips (same window and
+native 0.6 m grid) to `<outdir>/<year>/<item_id>__r<row>_c<col>.tif`:
+
+- `src/fetch_naip_chips.py`: windowed COG reads from the Planetary Computer.
+  No account is needed. `--local-dir` reuses fully downloaded items.
+- `src/fetch_naip_chips_ee.py`: Earth Engine `USDA/NAIP/DOQQ` via
+  `ee.data.computePixels` on the high-volume endpoint.
+
+```sh
+python fetch_naip_chips_ee.py <aoi>/_items.json <outdir> --project ecopro-509818 \
+    -t trees.shp:2016,2018 -j 8          # --inner 512 --margin 64 (px) by default
+```
+
+**Speed test** (2026-09-26, 60 chips of 640×640 px × 4 bands, 8 threads,
+from this Mac):
+
+| Source | Time | Rate |
+|---|---|---|
+| Earth Engine | 11 s | 5.6 chips/s (about 9 MB/s raw) |
+| Planetary Computer | 151 s | 0.4 chips/s |
+
+- **Pixel agreement.** 99.8% of pixel values are identical on average.
+  Differences occur only where quarter-quads overlap: EE mosaics the
+  collection, while PC reads one item.
+- **The Planetary Computer bottleneck is transfer, not auth.** A Planetary
+  Computer subscription key only raises SAS-token rate limits, not transfer
+  speed, and NAIP is hosted in Azure West Europe (`naipeuwest`).
+
+**Earth Engine setup:**
+- Cloud project `ecopro-509818` (name "ecopro"), registered for
+  noncommercial Earth Engine. Community tier: 150 EECU-hours per month, no
+  billing account.
+- Authenticate once per machine:
+  `earthengine authenticate --auth_mode=localhost`. The default mode
+  requires a working gcloud.
+- The Google Cloud CLI (586.0.0) is installed via Homebrew
+  (`brew upgrade --cask gcloud-cli`).
+
+For **whole quarter-quads**, EE export to Google Drive/Cloud Storage or AWS
+(below) are the options; the Planetary Computer is slow from here.
+
 ## Alternative source: AWS Open Data (requester pays)
 
 NAIP is also in the AWS Open Data registry as a **requester-pays** S3

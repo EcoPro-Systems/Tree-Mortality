@@ -96,21 +96,32 @@ def download(item, outfile, token):
     path_type=Path
 ))
 @click.option('-a', '--aoi', 'aois', multiple=True)
+@click.option('--bbox', nargs=4, type=float, default=None,
+              help='Ad hoc lon_min lat_min lon_max lat_max instead of the '
+                   'config AOIs (use with --name)')
+@click.option('--name', default='adhoc', show_default=True)
 @click.option('-y', '--year', 'years', multiple=True, type=int,
               help='NAIP year(s) to fetch (default: all available)')
+@click.option('-i', '--item', 'item_ids', multiple=True,
+              help='Only these STAC item id(s)')
 @click.option('-j', '--jobs', default=4, show_default=True)
 @click.option('--dry-run', is_flag=True)
-def main(configfile, outputdir, aois, years, jobs, dry_run):
+def main(configfile, outputdir, aois, bbox, name, years, item_ids, jobs,
+         dry_run):
 
     config = load_config(configfile)
-    aois = aois or list(config['aois'])
     token = Token()
+    if bbox:
+        targets = {name: tuple(bbox)}
+    else:
+        targets = {}
+        for a in aois or list(config['aois']):
+            aoi = config['aois'][a]
+            transform, shape = aoi_grid(aoi, config['size_m'],
+                                        config['resolution'])
+            targets[a] = aoi_lonlat_bbox(transform, shape, aoi['epsg'])
 
-    for name in aois:
-        aoi = config['aois'][name]
-        transform, shape = aoi_grid(aoi, config['size_m'],
-                                    config['resolution'])
-        bbox = aoi_lonlat_bbox(transform, shape, aoi['epsg'])
+    for name, bbox in targets.items():
         items = search(bbox, set(years))
         aoidir = outputdir / name
         os.makedirs(aoidir, exist_ok=True)
@@ -119,6 +130,8 @@ def main(configfile, outputdir, aois, years, jobs, dry_run):
 
         todo = []
         for item in items:
+            if item_ids and item['id'] not in item_ids:
+                continue
             ydir = aoidir / str(item['properties']['naip:year'])
             os.makedirs(ydir, exist_ok=True)
             with open(ydir / f'{item["id"]}.json', 'w') as f:

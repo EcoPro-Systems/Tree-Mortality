@@ -400,6 +400,115 @@ references** (100 m, `transfer.csv`):
   of Landsat features. A regular-cadence product needs one consistent
   definition, and a multi-year reference that matches it.
 
+### Running the Cheng model locally on NAIP (`hls_results/cheng_naip_replication/`)
+
+**Setup.**
+- **Code.** `src/proto_cheng_naip_inference.py`, in the `deadtree` conda env:
+  conda-forge PyTorch 2.10 with MPS, and segmentation-models-pytorch 0.3.4.
+- **Weights.** The public cross-resolution weights
+  (`cheng2024/cross_resolution_model/BestModel.pth`). This is the
+  *successor* of the model behind the 2020 statewide map, whose weights are
+  unpublished.
+- **Reimplementation.** The network head and inference follow the repo
+  (cloned at `cheng2024/Cross-Resolution-Dead-Tree-Segmentation`, commit
+  fd8af12):
+  - RGB/255 with ImageNet normalization;
+  - pixel size 0.6 m as the scalar input;
+  - 256 px patches with 10 px edges dropped;
+  - ordinal energy levels, then watershed to get crown instances.
+- **Checks.** The checkpoint loads with `strict=True`. Zoomed QC confirms
+  detections are on gray crowns with no NIR response (dead). QC images are
+  in `hls_results/cheng_naip_test/`.
+- **Speed.** On an M1 Pro (MPS), one 0.6 m quarter-quad (about 12,500 ×
+  10,200 px) takes about 50 s of inference plus about 12 s of watershed.
+- **Test area.** Three 2020 NAIP quarter-quads in `sierra_nf` (Aug 3–4,
+  2020), with Cheng map mean dead canopy of 3.1%, 2.4% and 1.5%. That is
+  about 350k detected crowns. Crowns are aggregated by centroid (count) and
+  area to Cheng's 100 m grid, using only cells fully covered by valid NAIP.
+
+**Agreement with the published 100 m map:**
+
+| | Dead-tree density | Dead-canopy fraction |
+|---|---|---|
+| 100 m, n = 12,966 cells (per quad) | r = 0.79 (0.73–0.85) | r = 0.81 (0.73–0.89) |
+| 300 m, n = 1,173 | r = 0.88 | r = 0.91 |
+| Mean ratio, ours ÷ map | 1.29 | 1.96 |
+
+**Interpretation.**
+- **The spatial pattern is reproduced well.** The successor model and
+  simple aggregation give r ≈ 0.8 at 100 m and about 0.9 at 300 m.
+- **The absolute level is higher.** We find about 1.3× more crowns, and
+  crowns about 1.5× larger (median 12–16 m² vs about 9 m² in the map's
+  crown-size layer), giving about 2× the dead-canopy fraction.
+- **Our run is not bias-corrected.** The published density *is*
+  bias-corrected, and the paper reports a 17–25% underestimation vs field
+  data, so correction should raise counts. Our higher counts therefore come
+  from the newer model, not from missing correction.
+- **Use with other years.** To pair a model-derived multi-year reference with
+  the 2020 map, calibrate linearly on 2020 (or use the model consistently
+  across all years and ignore the published map's absolute level).
+- **Practical implication.** Running the model on NAIP 2014–2022 for all
+  AOIs is feasible on this laptop: about 1 min per quarter-quad, so the
+  roughly 810 AOI quarter-quad-years take about 15 h, excluding download
+  time. That gives a biennial, consistent "visible dead crowns" reference
+  for training and validating a Landsat model across years.
+
+### Cheng model vs independent tree-level references (`hls_results/cheng_vs_hs_labels/`, `hls_results/cheng_vs_seki/`)
+
+**Data access.**
+- NAIP was fetched as 384 m chips (640 px) around each reference tree or
+  site (`src/fetch_naip_chips*.py`; see `naip_fetch.md`). Most came via
+  Google Earth Engine, about 14× faster than the Planetary Computer.
+- The model was run with `proto_cheng_naip_inference.py --by-year --no-cells`.
+- Scoring scripts: `proto_cheng_vs_hs_labels.py` and `proto_cheng_vs_seki.py`.
+
+**References.**
+- **Hemming-Schroeder (HS) 2017 hand labels at NEON SOAP/TEAK.** 8,897
+  lidar crowns photo-interpreted as live or dead from about 1 m NEON imagery
+  (2,516 dead). Every tree is labeled in 1,572 sampled 30 m pixels. NAIP
+  2016 and 2018 bracket the label date.
+- **USGS SEKI field data (Das 2024).** GPS-located trees with field status:
+  - 2020 transects (every tree > 40 cm): 290 dead, 962 live;
+  - north 2016 points: 98 dead, 92 live;
+  - roadside south 2020 points: 32 dead, 135 live;
+  - 2019 crown polygons (TAOs): 56 dead, 298 live.
+
+**Results** (detection = any model dead-crown pixel within the tolerance):
+
+| Reference | Sampling | Dead detected | Live with a detection | AUC |
+|---|---|---|---|---|
+| HS hand labels, exact crown overlap (2016 / 2018 NAIP) | complete within sampled pixels | 44% / 45% | 7% / 8% | 0.69 |
+| HS hand labels, within 2 m (high certainty only) | 〃 | 52–54% (60%) | 13–15% (16%) | 0.69–0.73 |
+| SEKI 2020 transects, within 2 / 5 m | systematic, all trees > 40 cm | 47% / 65% | 6% / 20% | 0.72 |
+| SEKI north 2016 points, within 2 / 5 m | hand-picked | 61% / 81% | 2% / 5% | 0.88 |
+| SEKI south 2020 roadside, within 2 m | hand-picked | 97% | 0% | 0.93 |
+| SEKI 2019 crown polygons, any hit (2018 / 2020 NAIP) | hand-picked TAOs | 80% / 64% | 21% / 18% | 0.85 / 0.76 |
+
+At 30 m, the labeled dead fraction vs the model's dead-canopy fraction in
+HS sample pixels gives ρ = 0.42–0.47.
+
+**Interpretation.**
+- **Sample design drives the scores.** Systematic or complete samples (SEKI
+  transects, HS sample pixels) give AUC ≈ 0.70–0.72 and find about 55–65%
+  of dead trees. They include small, partly occluded and ambiguous trees.
+  Hand-picked samples favour conspicuous trees and give AUC 0.85–0.93.
+- **The HS hand labels behave like field truth for this purpose.** Their
+  agreement with the model matches the systematic field transects, so they
+  are *not* obviously noisier. (An earlier note here suggested they were;
+  the positional-tolerance test does not support that.)
+- **Positional tolerance does not help.** Allowing 2–5 m finds more dead
+  trees but flags proportionally more live ones, so AUC is flat. NAIP
+  misregistration is not the main limit.
+- **Dead-foliage vs bare trees.** Among dead trees on the SEKI transects,
+  those still holding dead foliage (F1–F3) and bare ones (T0–T3) are
+  detected at similar rates, 64–65% within 5 m.
+- **Using the model as a reference for HLS.** It undercounts dead trees by
+  roughly a third in dense mixed conifer, consistent with the 17–25%
+  underestimation Cheng et al. report after bias correction. For a
+  cumulative-mortality target, calibrate with the systematic references
+  (HS pixels, SEKI transects) rather than treating model counts as
+  absolute.
+
 ## Next steps
 
 ### 1. Independent 30 m reference from NAIP dead-tree mapping (highest priority)
@@ -495,7 +604,7 @@ below the HLS pixel.
      `sierra_nf`, so 2020 validation there is limited to unburned pixels.
      `stanislaus` and `lassen` are mostly unaffected in 2020; Dixie (2021)
      affects `lassen` only from 2021.
-2. **If no weights, retrain.** Hand-digitize dead crowns in a few NAIP
+2. **(Superseded: public weights were found and run locally; see "Running the Cheng model locally" above.) If no weights, retrain.** Hand-digitize dead crowns in a few NAIP
    quarter-quads per AOI and year (their labelling protocol is in the paper),
    starting from the bundled example labels. Train with
    `train.treehealth_ordinal_watershed` on a GPU machine. Their paper

@@ -49,6 +49,24 @@ python proto_hls_vs_cheng.py $CFG $E/hls_results/cheng2020_4aoi
 python proto_hls_vs_hs.py    $CFG $E/hls_results/neon_hs
 ```
 
+- **Cheng model run locally on NAIP.** 3 quarter-quads in `sierra_nf`,
+  about 1 min each on MPS. Results are in
+  `hls_results/cheng_naip_replication/`. Use the `deadtree` conda env:
+  ```sh
+  ~/anaconda3/envs/deadtree/bin/python proto_cheng_naip_inference.py <outdir> <naip.tif> [...] --device mps
+  ```
+  It was built with `conda create -n deadtree -c conda-forge python=3.10
+  rasterio scikit-image scipy pandas pyproj tqdm click pyyaml pytorch
+  torchvision` plus `pip install segmentation-models-pytorch==0.3.4`.
+  - Install PyTorch from conda-forge, not pip: the pip wheel's bundled
+    libomp crashes alongside conda-forge's ("OMP: Error #15").
+  - The env has no matplotlib; plot with the `ecopro` env.
+
+- **Tree-level validation of the Cheng model.** Against the NEON hand
+  labels and the SEKI field data (NAIP chips in `naip_chips/`, results in
+  `hls_results/cheng_vs_{hs_labels,seki}/`). Earth Engine project:
+  `ecopro-509818`.
+
 ## Environment
 
 - Conda env `ecopro` was created from `environment.yml`; `pypdf` was added
@@ -102,7 +120,7 @@ skips leave-one-AOI-out.
 Code: `src/fetch_hls_aoi.py`, `fetch_landcover_aoi.py`, `ads_labels_aoi.py`,
 `hls_annual_composites.py`, `hls_flight_composites.py`,
 `proto_hls_mortality_signal.py`, `proto_hls_mortality_model.py`,
-`proto_ads_repeat_flights.py`, `fetch_naip_aoi.py`, `hls_naip_composites.py`, `proto_hls_vs_cheng.py`, `proto_hls_vs_hs.py`. Config: `config/hls_aois.yml`.
+`proto_ads_repeat_flights.py`, `fetch_naip_aoi.py`, `hls_naip_composites.py`, `proto_hls_vs_cheng.py`, `proto_hls_vs_hs.py`, `proto_cheng_naip_inference.py`, `fetch_naip_chips.py`, `fetch_naip_chips_ee.py`, `proto_cheng_vs_hs_labels.py`, `proto_cheng_vs_seki.py`. Config: `config/hls_aois.yml`.
 
 ## Gotchas
 
