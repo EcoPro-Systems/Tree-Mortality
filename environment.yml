@@ -27,3 +27,4 @@ dependencies:
   - cdsapi
   - skops
   - werkzeug
+  - pyhdf  # MASTER L1B (HDF4); installed with pip in the existing env

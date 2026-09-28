@@ -509,6 +509,369 @@ HS sample pixels gives ρ = 0.42–0.47.
   (HS pixels, SEKI transects) rather than treating model counts as
   absolute.
 
+### Comparison with published accuracy of the Cheng et al. models
+
+**Published results** for the original 2024 model ([Cheng et al. 2024, Nat.
+Commun. 15:641](https://doi.org/10.1038/s41467-024-44991-z)):
+- **Hand-digitized NAIP trees (about 3,000):** dead-tree IoU 0.53, count
+  bias −3.6%, MAE 2.27 dead trees/ha.
+- **Field point locations (2016–2020):** count underestimation 16.7–24.7%,
+  i.e. roughly 75–83% of dead trees found.
+- **Field plots (DBH > 40 cm, 2016 and 2018):** underestimation 5–20%, MAE
+  2.2–2.9 trees/ha.
+- **2020 model applied to 2016, 2018 and 2022:** underestimation 16.7–53.1%,
+  highest in 2022.
+- **Direct benchmark in the USGS release**
+  (`usgs_seki_deadtree_validation/MCV2018NorthValidationNAIP.csv`, original
+  model on 2018 NAIP, tree counted as detected if a predicted crown with a
+  6 m buffer overlaps it):
+  - **69% of 197 field-dead trees** detected;
+  - by plot 17–89%;
+  - by species: ABCO 59%, ABMA 58%, PILA 91%, CADE 100%.
+
+**No published accuracy exists for the newer cross-resolution weights we
+use.** Their only citation is the software release
+([Zenodo 10.5281/zenodo.17234915](https://doi.org/10.5281/zenodo.17234915)).
+Möhring et al. 2025 (ISPRS Open J.), co-authored by Cheng, describes a
+different, global deadwood model.
+
+**Side by side:**
+
+| Test | Newer model (this work) | Original model (published) |
+|---|---|---|
+| Systematic transects, all trees > 40 cm | 65% of dead within 5 m, 72–83% within 10 m (2020) | 69% within a 6 m buffer (2018, same USGS transect survey) |
+| Hand-picked field points | 81–97% within 5 m | about 75–83% (16.7–24.7% undercount) |
+| Hand labels | 44–53% of dead crowns hit by exact overlap; AUC ≈ 0.7 (independent HS labels) | IoU 0.53 vs their own NAIP labels |
+| Dead-tree density vs the 2020 map | +29% | map is bias-corrected upward |
+| Years other than 2020 | no drop for 2016 or 2018 (NEON) | 17–53% undercount |
+
+**Interpretation.**
+- **Comparable performance.** On the same kind of field data, the newer
+  model performs about like the original: roughly two-thirds of dead trees
+  found in systematic plots, and 80–95% of conspicuous ones. It does not
+  obviously degrade for 2016 or 2018.
+- **The SEKI data is not independent of Cheng's work.** It was collected to
+  validate the original NAIP model, so our SEKI scores re-test on the
+  authors' own validation data. The HS hand labels are the independent
+  check, and they give the lower end of the range.
+- **Count bias understates per-tree error.** Omissions and commissions
+  partly cancel in count bias. On the transects, 15–20% of live trees have a
+  detection within 5 m, while about a third of dead trees are missed. That
+  is why a −4% to −20% count bias coexists with 65–80% per-tree detection.
+  For HLS training, calibrate model-derived references against the
+  systematic samples rather than relying on the published bias figures.
+
+### WDTS airborne imaging spectroscopy (`hls_results/wdts/`, `hls_results/master_quicklook/`)
+
+**What WDTS is.** [WDTS](https://www.earthdata.nasa.gov/data/projects/wdts/data-access-tools)
+is NASA's Western Diversity Time Series. It is ER-2 airborne imagery of fixed
+California flight boxes, and before 2020 it was the HyspIRI campaign. It is
+**not a mortality dataset** and has no dead-tree labels. So the question
+tested here is whether airborne imaging spectroscopy adds skill over HLS
+against our existing references.
+
+Products checked (all at ORNL DAAC, with the same Earthdata `.netrc` auth):
+
+| Product | Resolution, years | Notes |
+|---|---|---|
+| AVIRIS-C foliar-trait mosaics ([2403](https://doi.org/10.3334/ORNLDAAC/2403), `WDTS_AVIRIS-C_foliar_traits_2403`) | 30 m COG, 2013–2018, 2–4 dates/yr | **Used.** 14 PLSR traits (LMA, N, chlorophyll, …) with mean and sd, plus QC bands. The grid coincides with the HLS AOI grids |
+| AVIRIS-C traits by flight line ([2454](https://doi.org/10.3334/ORNLDAAC/2454)) | 15 m ENVI | Not used |
+| AVIRIS-C corrected reflectance ([2391](https://doi.org/10.3334/ORNLDAAC/2391)) | 15 m, 224 bands, ENVI BSQ | Not used. About 60 GB per line and ~16 TB over our AOIs; remote windowed reads do work |
+| MASTER L1B/L2 ([1940](https://doi.org/10.3334/ORNLDAAC/1940), 1953, 2141, 2252, 2383, 2471) | ~50 m, 50 bands VNIR–TIR, 2020–2025 | Quick look only (Fall 2020) |
+
+**Coverage.** Each AOI maps to a WDTS flight box:
+- **`sierra_nf` and `neon_soap_teak`:** inside the Yosemite box, with 100% footprint on every early-summer date 2013–2018.
+- **`stanislaus`:** in the Tahoe box, 15 dates.
+- **SEKI:** only about 15–20%.
+- **`lassen`:** none.
+
+**Fetch.** `fetch_wdts_traits.py` pulls one early-summer date per year:
+`20130612_v2, 20140603, 20150601_v2, 20160621, 20170607, 20180622`. The
+`_v2` files are the radiometrically stabilized versions that the user guide
+recommends for between-year use. Output goes to `wdts/<aoi>_traits.nc`.
+
+**Mosaic structure.** The mosaics are aggregated from 15 m. Each QC band is
+the fraction of 15 m subpixels that pass, and the trait mean is nodata
+wherever no subpixel passes.
+- In forest, 8–33% of pixels are masked, depending on year.
+- Masked pixels have `QC_fc` ≈ 0, meaning green-vegetation cover below 0.5. That includes dead canopy.
+- So the trait maps drop exactly the pixels that matter most. The QC fractions (`qc_all`, `qc_fc`, `qc_shadow`) are kept as features instead.
+
+**Method.** `proto_hls_vs_wdts.py` compares three feature sets on identical
+samples and folds: `hls`, `wdts`, and `both`.
+- **HLS features:** `year_features` on the L30 composites matched to the 2020 NAIP date.
+- **WDTS features:** the same year-relative construction (raw, change vs 2013, d1–d3, cmin/cmax) applied to the 14 trait means and the 3 QC fractions.
+- **Samples:** NLCD forest, unburned through Y. The model is HGB.
+- **Sanity check:** HLS-only skill on the NEON target reproduces `neon_hs/` (ρ 0.68 / 0.75 / 0.79 at 30 / 90 / 270 m).
+
+Results:
+
+| Target | CV | hls | wdts | both |
+|---|---|---|---|---|
+| NEON HS dead fraction 2017/18 (ρ) | leave-one-year-out + blocks, 30 m | 0.68 | 0.46 | 0.69 |
+| | same, 270 m | 0.79 | 0.55 | 0.72 |
+| Cheng 2020 % dead, 100 m (R², ρ) | 5-fold 3 km blocks | 0.45, 0.68 (HLS 2018) | 0.42, 0.65 (2018) | 0.49, 0.70 |
+| | same, HLS at 2020 | 0.47, 0.69 | | 0.50, 0.71 |
+| ADS polygon fraction 2014–18 (AUC) | leave-one-year-out + blocks, 90 m | 0.52 | 0.57 | 0.57 |
+| | leave-one-AOI-out, 90 m | 0.76–0.78 | 0.76–0.81 | 0.76–0.81 |
+
+- **NEON (the best reference) favors HLS.** WDTS alone is clearly worse,
+  and adding it to HLS gives nothing at 30 m and hurts at 270 m.
+- **Cheng 2020 gains a little.** WDTS alone is close to HLS at the same
+  date (R² 0.42 vs 0.45). Adding it gains about 0.04 R² under block CV, but
+  it is not consistently better under leave-one-AOI-out: `neon_soap_teak`
+  R² drops from 0.34 to 0.28 when WDTS is added to HLS 2018.
+- **ADS remains unpredictable across years with either source.**
+  Leave-one-year-out AUC is 0.5–0.63. This matches the earlier finding that
+  ADS is not a pixel-level target. WDTS is marginally higher, but in a range
+  where nothing works.
+- **Single traits are weak.** The best WDTS changes against NEON are sugar
+  (ρ 0.46), NSC (0.43) and starch (−0.38). HLS ΔNDVI/ΔNDMI/ΔRGI reach
+  |ρ| 0.61–0.64 at 90 m. Against Cheng, the WDTS traits give |ρ| ≤ 0.34,
+  while HLS ΔNDMI gives −0.49.
+- **Why the traits underperform.** The mosaics are not consistent between
+  years. The ΔLMA 2013→2016 map (`maps_sierra_nf_2016.png`) is dominated by
+  north–south flight-line striping of ±60 g/m², with no visible ADS
+  pattern. The green-cover pass fraction falls scene-wide from 81% (2013) to
+  56% (2017). Only `qc_fc` shows the large disturbance patches that HLS
+  ΔNDMI shows. The user guide warns about this: only the Yosemite `_v2`
+  dates are calibrated for trends, and that covers just 2 of our 6 years. On
+  top of that, the PLSR traits are fitted to live foliage, and dead canopy is
+  masked.
+
+**MASTER quick look.** `proto_master_quicklook.py` uses flight 2190600 on
+2020-10-15, lines 01–04 over NEON SOAP/TEAK. The Creek Fire burned 68% of
+`sierra_nf` in 2020, so that AOI was not used. The lines were flown through
+the fire's smoke ("> 70% clear").
+- **Processing:** TOA reflectance and 11.3 µm brightness temperature, binned
+  into Cheng 100 m cells over forest unburned 2012–2020, taking the
+  nearest-nadir line where lines overlap.
+- **Agreement with HLS:** MASTER agrees with HLS 2020 for the same quantity
+  (SWIR1 ρ 0.86; NIR 0.58, which is smoke-affected).
+- **Against the NEON lidar reference, within each site,** single-date MASTER
+  NDMI/NBR (ρ −0.65 SOAP / −0.41 TEAK against HS 2019) match single-date HLS
+  NDMI (−0.67 / −0.39). HLS change since 2013 does better at SOAP (−0.73).
+  Thermal BT also tracks mortality (ρ +0.53 SOAP, +0.23 TEAK). Correlations
+  pooled across both sites are inflated by the SOAP/TEAK contrast.
+- **Against Cheng 2020 over the whole AOI (42.6k cells, block CV):** HLS
+  R² 0.49, MASTER 0.18, HLS+MASTER 0.51.
+
+**Conclusion.** For our purposes, WDTS is a feature source, not a reference.
+Its trait products add at most a few hundredths of R² over HLS for Cheng
+2020, and nothing for the NEON lidar reference. The main limits are the
+inconsistent between-year calibration and the masking of non-green canopy.
+MASTER single-date features are about equivalent to single-date HLS. It is
+not worth extending the trait analysis to `stanislaus` or to fall dates.
+Two things might still pay off:
+- the 15 m reflectance itself (e.g. unmixing into green, non-photosynthetic
+  and soil fractions, SWIR cellulose/lignin features), bought at the ~60 GB
+  per line cost;
+- the AVIRIS-3/-5 collections (2023+) for recent mortality.
+
+### Predisposition: do pre-mortality indicators predict which trees die? (`hls_results/predisposition/`)
+
+**Question.** This asks whether WDTS (and HLS, and MASTER) can be used
+*prospectively*: do indicators measured before trees die predict which ones
+die, beyond what tree size, stand structure, topography and climate already
+explain?
+
+**Setup.** `proto_predisposition_neon.py` uses the Hemming-Schroeder
+tree-level release.
+- **Trees:** about 1M lidar crowns at SOAP/TEAK, each with a live/dead status
+  per year (relative greenness in NEON imagery) and per-tree covariates.
+- **Cohort A, the 2015–17 die-off:** trees live in 2013, scored as died (dead
+  in both 2017 and 2018) or survived (live in both). n = 637k; 49% died at
+  SOAP, 22% at TEAK.
+- **Cohort B, the 2020–22 wave:** trees live in 2018 and 2019, scored as dead
+  or live in 2021. n = 609k; 36% died at SOAP, 6% at TEAK.
+- **Feature groups:**
+  - **S:** 2013 height and crown area, tpa, neighbour distance, cover,
+    elevation, slope, aspect, climate normals, granite, distance to rivers,
+    and site.
+  - **H:** HLS at the tree's 30 m pixel.
+  - **W:** WDTS traits at the tree's 30 m pixel.
+  - **M:** MASTER 2020-10-15 at the nearest pixel.
+- **Evaluation:** HGB classifier; 5-fold CV on 1 km blocks, plus
+  leave-one-site-out.
+- **Pixel oracle:** each tree is scored by the observed death rate of the
+  other cohort trees in its 30 m pixel. This is the ceiling for any
+  pixel-constant predictor. It is noisy because the CV uses a 200k-tree
+  subsample.
+
+**Results.** AUC under 1 km block CV, with leave-one-site-out AUC for
+SOAP / TEAK in brackets:
+
+| Features | Cohort A (2013–14 → 2017–18) | Cohort B (2018–20 → 2021) |
+|---|---|---|
+| S (structure/site/climate) | 0.792 (0.79 / 0.60) | 0.816 (0.55 / 0.51) |
+| H (HLS pre-mortality) | 0.717 | 0.785 |
+| W (WDTS traits; 2013–14 for A, 2018 for B) | 0.708 | 0.769 |
+| M (MASTER Oct 2020) | — | 0.817 (0.77 / 0.56) |
+| S+H | 0.805 | 0.824 |
+| S+W | 0.796 | 0.821 |
+| S+H+W | 0.805 (0.82 / 0.60) | — |
+| S+H+W + June 2015 | 0.809 | — |
+| S+M / S+H+W+M | — | 0.845 / 0.845 |
+| 30 m pixel oracle | 0.705 | 0.760 |
+
+- **Structure and site dominate, as in the literature.** Tree height is
+  the strongest single predictor (AUC 0.64 within site × 200 m elevation
+  strata). This matches Stovall et al. 2019 and Hemming-Schroeder et al. 2023.
+- **Pre-mortality spectral data add little.** WDTS 2013–14 traits add
+  +0.004 AUC to S, and HLS adds +0.013. The gain is larger when transferring
+  to SOAP (0.79 → 0.82), the water-limited site. That matches Queally et al.
+  2025 (GCB, doi:10.1111/gcb.70246), who found traits mattered at SOAP and
+  hardly at TEAK.
+- **Trait directions replicate Queally et al.** Within site × elevation
+  strata, trees in pixels with higher 2013 LMA (AUC 0.59), lower N (0.42),
+  and higher starch and lignin (0.57) died more. Pooled across strata, the
+  LMA sign reverses (0.43), so the elevation/site confound has to be
+  controlled. Sugars and NSC showed nothing (0.48–0.49), unlike Queally's
+  leaf-sugar result.
+- **The best HLS early-warning signal is drying.** An early 2013→2014 fall in
+  NDMI/NDVI (AUC 0.42–0.43) and a rise in RGI (0.585) preceded death by
+  1–4 years, consistent with the canopy-water-loss literature. WDTS has no
+  canopy-water product, and that is the strongest pre-mortality indicator in
+  the literature (Asner et al. 2016; Brodrick & Asner 2017).
+- **Resolution caps tree-level prediction.** A 30 m pixel holds tens of
+  trees. The pixel oracle (AUC 0.71 / 0.76) is below S, because height and
+  size vary within pixels. So 30 m indicators can say which stands are
+  vulnerable, not which trees.
+- **MASTER's large gain in cohort B is mostly early detection.** MASTER
+  NBR/NDMI/SWIR (within-strata AUC 0.31–0.34, i.e. |0.5 − AUC| ≈ 0.17–0.19)
+  and 11.3 µm BT (0.61; hotter pixels died) are the strongest single features.
+  But 2020-10-15 falls between the 2019 and 2021 status years, after the
+  summer 2020 beetle season, so many of those trees were probably already
+  attacked or fading. HLS at the summer-2020 NAIP date is much weaker (0.58),
+  which also suggests the signal developed during 2020.
+- **Transfer across sites fails.** Leave-one-site-out TEAK AUC is about
+  0.55–0.60 for every feature set. The TEAK base rate is low (6–22%), and it
+  has a different species and elevation mix.
+
+**Answer.** Early-warning indicators exist but are weak once structure and
+site are known.
+- **Useful 1–3 years ahead:** pre-drought canopy drying (HLS ΔNDMI) and a
+  "dense, high-LMA, low-N" trait syndrome. They are most useful at
+  water-limited low-elevation sites.
+- **A resilience map needs:**
+  - structure (lidar height and density) and climatic water deficit as the
+    backbone;
+  - canopy water content change (from the 2391 reflectance, or HLS
+    NDMI/SWIR);
+  - the trait syndrome where available.
+- **Next test:** derive canopy water content (EWT) from the WDTS 15 m
+  reflectance for 2013–2015 and test its change against cohort A.
+- **Test cohort B's MASTER signal properly:** repeat with a pre-attack date
+  (MASTER/AVIRIS June 2020, if flown) to separate prediction from early
+  detection.
+
+### Literature: remote-sensing indicators of predisposition to drought mortality
+
+All citations below were checked against a publisher page or Crossref DOI
+(2026-09). Numbers are from the papers' abstracts or text.
+
+- **Canopy water content (CWC) is the best-supported pre-mortality spectral indicator.**
+  - Asner et al. 2016 mapped progressive CWC loss 2011–2015 across
+    California from CAO spectroscopy plus Landsat. More than 30% loss
+    occurred on about 1 Mha.
+  - Brodrick & Asner 2017 found that cumulative CWC loss 2011–2015 predicted
+    2016 mortality. The 2014→15 loss predicted next-year mortality rising
+    from about 1% to about 5%. The relationship is weak at low stress and
+    varies by community.
+  - Brodrick et al. 2019 extended CWC to 1990–2017 and mapped drought
+    resistance.
+  - Sapes et al. 2019 give the physiological basis: plant water content
+    integrates hydraulic and carbon status.
+  - Allen et al. 2026 caution that canopy structure can mask leaf drying, so
+    single-date EWT is unreliable and time series are needed.
+- **Foliar traits from WDTS.**
+  - Queally et al. 2025 (GCB) used the WDTS 2014 AVIRIS-C traits at
+    SOAP/TEAK against Stovall and Hemming-Schroeder mortality.
+  - At SOAP, mortality rose with height, LMA, leaf sugars and CWC loss, and
+    fell with N. At TEAK, elevation and climate dominated, with little role
+    for traits. Site R² was 0.31–0.55.
+  - Shen et al. 2025 discuss that study.
+  - The WDTS trait-change paper (Zheng et al., "in preparation for PNAS")
+    had not been published as of 2026-09.
+- **Structure, site and climate.**
+  - Stovall et al. 2019: mortality risk rose 1.26× per 10 m of tree height,
+    amplified by VPD.
+  - Stephenson & Das 2020: the height effect largely reflects pines
+    dominating the tall classes.
+  - Hemming-Schroeder et al. 2023: 25.4% of trees died 2013–2017. Height,
+    elevation, density and distance to rivers were the predictors.
+  - Young et al. 2017: dry and dense stands died disproportionately.
+  - Restaino et al. 2019; Koontz et al. 2021: host size interacts with
+    climatic water deficit.
+  - Paz-Kagan et al. 2017: mortality was higher at low elevation, on SW
+    aspects and on shallow soils.
+  - Goulden & Bales 2019: deep (5–15 m) subsurface moisture depletion drove
+    the die-off.
+- **Beetles.**
+  - Stephenson et al. 2019; Trugman et al. 2021: fir engraver acts as a
+    "stress compounder" that kills already-stressed firs, while *Dendroctonus*
+    beetles take the largest pines regardless of stress. Spectral stress
+    indicators should therefore work better for fir.
+  - Erbilgin et al. 2021; Adams et al. 2017: NSC depletion is inconsistent
+    and follows beetle attack. Foliar NSC is a weak warning signal.
+  - Fettig et al. 2019 give the scale of pine mortality.
+- **Satellite early-warning signals.**
+  - Liu et al. 2019: lag-1 autocorrelation of Landsat NDVI warned more than
+    6 months ahead in 75% of cases. Skill decays with lead time and at fine
+    scale (AUC 0.61–0.71 at 1/8°), and depends on species.
+  - Byer & Jin 2017: higher pre-drought productivity predicted MODIS-scale
+    mortality.
+  - Rogers et al. 2018; Keen et al. 2022: multi-year early-warning signals
+    in the boreal and in tree rings.
+  - Forzieri et al. 2022; Smith et al. 2022: global resilience-loss
+    indicators, not validated at stand scale.
+  - Kunik et al. 2026: satellite solar-induced fluorescence (SIF) fell about
+    2 years before beetle mortality.
+  - Yang et al. 2021: thermal ET stress precedes mortality.
+  - Ganz et al. 2025 (preprint): mortality forecasts barely beat
+    spatial-autocorrelation baselines. Validate against naive
+    neighbourhood models.
+- **Detection, not prediction.** Tane et al. 2018 and Huesca et al. 2021
+  map red-stage mortality with imaging spectroscopy. Coates et al. 2015
+  relate AVIRIS green-vegetation fraction to MASTER surface temperature.
+
+#### References
+
+1. Adams HD et al. (2017) A multi-species synthesis of physiological mechanisms in drought-induced tree mortality. Nat Ecol Evol 1:1285–1291. https://doi.org/10.1038/s41559-017-0248-x
+2. Allen J, Anderegg LDL, Roberts D, Trugman AT (2026) Detecting drought stress from the leaf to the landscape. New Phytol 251(6):3256–3270. https://doi.org/10.1111/nph.71450
+3. Asner GP et al. (2016) Progressive forest canopy water loss during the 2012–2015 California drought. PNAS 113(2):E249–E255. https://doi.org/10.1073/pnas.1523397113
+4. Brodrick PG, Asner GP (2017) Remotely sensed predictors of conifer tree mortality during severe drought. Environ Res Lett 12:115013. https://doi.org/10.1088/1748-9326/aa8f55
+5. Brodrick PG, Anderegg LDL, Asner GP (2019) Forest drought resistance at large geographic scales. Geophys Res Lett 46(5):2752–2760. https://doi.org/10.1029/2018GL081108
+6. Byer S, Jin Y (2017) Detecting drought-induced tree mortality in Sierra Nevada forests with time series of satellite data. Remote Sens 9(9):929. https://doi.org/10.3390/rs9090929
+7. Coates AR, Dennison PE, Roberts DA, Roth KL (2015) Monitoring the impacts of severe drought on southern California chaparral species using hyperspectral and thermal infrared imagery. Remote Sens 7(11):14276–14291. https://doi.org/10.3390/rs71114276
+8. Erbilgin N et al. (2021) Combined drought and bark beetle attacks deplete non-structural carbohydrates and promote death of mature pine trees. Plant Cell Environ 44(12). https://doi.org/10.1111/pce.14197
+9. Fettig CJ, Mortenson LA, Bulaon BM, Foulk PB (2019) Tree mortality following drought in the central and southern Sierra Nevada. For Ecol Manage 432:164–178. https://doi.org/10.1016/j.foreco.2018.09.006
+10. Forzieri G et al. (2022) Emerging signals of declining forest resilience under climate change. Nature 608:534–539. https://doi.org/10.1038/s41586-022-04959-9
+11. Ganz K et al. (2025) Spatially explicit forest mortality forecasts are driven by autocorrelation, not ecological context. bioRxiv (preprint). https://doi.org/10.1101/2025.11.19.689366
+12. Goulden ML, Bales RC (2019) California forest die-off linked to multi-year deep soil drying in 2012–2015 drought. Nat Geosci 12:632–637. https://doi.org/10.1038/s41561-019-0388-5
+13. Hemming-Schroeder NM et al. (2023) Estimating individual tree mortality in the Sierra Nevada using lidar and multispectral reflectance data. JGR Biogeosci 128:e2022JG007234. https://doi.org/10.1029/2022JG007234
+14. Huesca M et al. (2021) Detection of drought-induced blue oak mortality in the Sierra Nevada Mountains, California. Ecosphere 12(6):e03558. https://doi.org/10.1002/ecs2.3558
+15. Keen RM et al. (2022) Changes in tree drought sensitivity provided early warning signals to the California drought and forest mortality event. Glob Change Biol 28(3):1119–1132. https://doi.org/10.1111/gcb.15973
+16. Koontz MJ et al. (2021) Cross-scale interaction of host tree size and climatic water deficit governs bark beetle-induced tree mortality. Nat Commun 12:129. https://doi.org/10.1038/s41467-020-20455-y
+17. Kunik L et al. (2026) Characterizing effects of tree mortality from wildfire and bark beetles using satellite observations of solar-induced chlorophyll fluorescence. Remote Sens Environ 344:115550. https://doi.org/10.1016/j.rse.2026.115550
+18. Liu Y, Kumar M, Katul GG, Porporato A (2019) Reduced resilience as an early warning signal of forest mortality. Nat Clim Change 9:880–885. https://doi.org/10.1038/s41558-019-0583-9
+19. Paz-Kagan T et al. (2017) What mediates tree mortality during drought in the southern Sierra Nevada? Ecol Appl 27(8):2443–2457. https://doi.org/10.1002/eap.1620
+20. Queally N et al. (2025) Functional traits from imaging spectroscopy inform patterns of forest mortality during Sierra Nevada drought. Glob Change Biol 31(5):e70246. https://doi.org/10.1111/gcb.70246
+21. Restaino C et al. (2019) Forest structure and climate mediate drought-induced tree mortality in forests of the Sierra Nevada, USA. Ecol Appl 29(4):e01902. https://doi.org/10.1002/eap.1902
+22. Rogers BM et al. (2018) Detecting early warning signals of tree mortality in boreal North America using multiscale satellite data. Glob Change Biol 24(6):2284–2304. https://doi.org/10.1111/gcb.14107
+23. Sapes G et al. (2019) Plant water content integrates hydraulics and carbon depletion to predict drought-induced seedling mortality. Tree Physiol 39(8):1300–1312. https://doi.org/10.1093/treephys/tpz062
+24. Shafron E et al. (2025) WDTS: AVIRIS-Classic L2B Corrected and Georectified Surface Reflectance, 2013–2018. ORNL DAAC. https://doi.org/10.3334/ORNLDAAC/2391
+25. Shen M, Dahlin K, Xu X, Butterfield Z (2025) Trait-based tree mortality risk assessment from the perspective of imaging spectroscopy. Glob Change Biol 31(7):e70337. https://doi.org/10.1111/gcb.70337
+26. Smith T, Traxl D, Boers N (2022) Empirical evidence for recent global shifts in vegetation resilience. Nat Clim Change 12:477–484. https://doi.org/10.1038/s41558-022-01352-2
+27. Stephenson NL, Das AJ (2020) Height-related changes in forest composition explain increasing tree mortality with height during an extreme drought. Nat Commun 11:3402. https://doi.org/10.1038/s41467-020-17213-5
+28. Stephenson NL et al. (2019) Which trees die during drought? The key role of insect host-tree selection. J Ecol 107(5):2383–2401. https://doi.org/10.1111/1365-2745.13176
+29. Stovall AEL, Shugart H, Yang X (2019) Tree height explains mortality risk during an intense drought. Nat Commun 10:4385. https://doi.org/10.1038/s41467-019-12380-6
+30. Tane Z et al. (2018) A framework for detecting conifer mortality across an ecoregion using high spatial resolution spaceborne imaging spectroscopy. Remote Sens Environ 209:195–210. https://doi.org/10.1016/j.rse.2018.02.073
+31. Trugman AT et al. (2021) Why is tree drought mortality so hard to predict? Trends Ecol Evol 36(6):520–532. https://doi.org/10.1016/j.tree.2021.02.001
+32. Yang Y et al. (2021) Studying drought-induced forest mortality using high spatiotemporal resolution evapotranspiration data from thermal satellite imaging. Remote Sens Environ 265:112640. https://doi.org/10.1016/j.rse.2021.112640
+33. Young DJN et al. (2017) Long-term climate and competition explain forest mortality patterns under extreme drought. Ecol Lett 20(1):78–86. https://doi.org/10.1111/ele.12711
+34. Zheng T et al. (2025) WDTS: AVIRIS-Classic Derived Plant Trait Mosaics, 2013–2018. ORNL DAAC. https://doi.org/10.3334/ORNLDAAC/2403 (and per-flight-line traits, https://doi.org/10.3334/ORNLDAAC/2454)
+
 ## Next steps
 
 ### 1. Independent 30 m reference from NAIP dead-tree mapping (highest priority)

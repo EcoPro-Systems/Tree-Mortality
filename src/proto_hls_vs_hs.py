@@ -61,19 +61,19 @@ SCALES = [1, 3, 9]
 VARIABLES = ROLES + INDICES
 
 
-def year_features(comp, year):
+def year_features(comp, year, variables=VARIABLES, base_year=BASE_YEAR):
     """Year-relative feature arrays (name -> 2D) for year Y"""
     yrs = set(comp.year.values.tolist())
     out = {}
-    for v in VARIABLES:
+    for v in variables:
         X = lambda y: comp[v].sel(year=y).values
-        base = X(BASE_YEAR)
+        base = X(base_year)
         out[f'{v}_raw'] = X(year)
         out[f'{v}_base'] = X(year) - base
         for k in (1, 2, 3):
             out[f'{v}_d{k}'] = (X(year) - X(year - k)
                                 if year - k in yrs else np.nan * base)
-        hist = np.stack([X(y) - base for y in range(BASE_YEAR + 1, year + 1)])
+        hist = np.stack([X(y) - base for y in range(base_year + 1, year + 1)])
         with np.errstate(all='ignore'):
             out[f'{v}_cmin'] = np.nanmin(hist, axis=0)
             out[f'{v}_cmax'] = np.nanmax(hist, axis=0)
