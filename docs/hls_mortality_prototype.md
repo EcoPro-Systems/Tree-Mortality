@@ -668,102 +668,127 @@ Two things might still pay off:
   per line cost;
 - the AVIRIS-3/-5 collections (2023+) for recent mortality.
 
-### Predisposition: do pre-mortality indicators predict which trees die? (`hls_results/predisposition/`)
+### Predisposition: do pre-mortality indicators predict the fraction of trees that die? (`hls_results/predisposition/`)
 
-**Question.** This asks whether WDTS (and HLS, and MASTER) can be used
-*prospectively*: do indicators measured before trees die predict which ones
-die, beyond what tree size, stand structure, topography and climate already
-explain?
+**Question.** Can indicators measured *before* mortality predict the
+**fraction of trees in a 30 m (or 90 m) cell that go on to die**, beyond
+stand structure, topography and climate? We don't try to identify
+individual trees; the tree-level data only supply the per-cell target.
 
-**Setup.** `proto_predisposition_neon.py` uses the Hemming-Schroeder
-tree-level release.
-- **Trees:** about 1M lidar crowns at SOAP/TEAK, each with a live/dead status
-  per year (relative greenness in NEON imagery) and per-tree covariates.
-- **Cohort A, the 2015–17 die-off:** trees live in 2013, scored as died (dead
-  in both 2017 and 2018) or survived (live in both). n = 637k; 49% died at
-  SOAP, 22% at TEAK.
-- **Cohort B, the 2020–22 wave:** trees live in 2018 and 2019, scored as dead
-  or live in 2021. n = 609k; 36% died at SOAP, 6% at TEAK.
-- **Feature groups:**
-  - **S:** 2013 height and crown area, tpa, neighbour distance, cover,
-    elevation, slope, aspect, climate normals, granite, distance to rivers,
-    and site.
-  - **H:** HLS at the tree's 30 m pixel.
-  - **W:** WDTS traits at the tree's 30 m pixel.
-  - **M:** MASTER 2020-10-15 at the nearest pixel.
-- **Evaluation:** HGB classifier; 5-fold CV on 1 km blocks, plus
-  leave-one-site-out.
-- **Pixel oracle:** each tree is scored by the observed death rate of the
-  other cohort trees in its 30 m pixel. This is the ceiling for any
-  pixel-constant predictor. It is noisy because the CV uses a 200k-tree
-  subsample.
+**Data.** The Hemming-Schroeder tree-level release: about 1M lidar crowns at
+SOAP/TEAK with a live/dead status per year (relative greenness in NEON
+imagery) and per-tree covariates.
 
-**Results.** AUC under 1 km block CV, with leave-one-site-out AUC for
-SOAP / TEAK in brackets:
+**Targets** (cells need at least 5 cohort trees; models are weighted by
+that count):
+- **Cohort A, the 2015–17 die-off:** the fraction of trees live in 2013 that
+  were dead in both 2017 and 2018. Trees with inconsistent labels are
+  dropped. 69.7k cells at 30 m; mean 0.33 (SOAP 0.49, TEAK 0.23).
+- **Cohort B, the 2020–22 wave:** the fraction of trees live in 2018–19 that
+  were dead in 2021. 57.2k cells; mean 0.12 (SOAP 0.35, TEAK 0.06).
 
-| Features | Cohort A (2013–14 → 2017–18) | Cohort B (2018–20 → 2021) |
+**Features** (cell means over the 2013 lidar trees):
+- **S, stand/site:**
+  - tree count, mean / p90 / max 2013 height, fraction of trees over 30 m,
+    crown area, fraction already dead in 2013;
+  - tpa, neighbour distance, cover, elevation, slope, aspect, climate
+    normals, granite, distance to rivers, site.
+- **H:** HLS L30 NAIP-date composites.
+- **W:** WDTS traits.
+- **C:** canopy water from the WDTS 15 m reflectance (below).
+- **M:** MASTER 2020-10-15.
+
+Cohort A uses 2013, 2014 and Δ2014−2013. The 2015 (June) data, taken as the
+die-off began, is added separately. Cohort B uses 2018–2020.
+
+**Canopy water content from WDTS** (`fetch_wdts_cwc.py`, output
+`wdts/neon_soap_teak_cwc.nc`):
+- **Input:** the 2391 corrected reflectance (15 m, 224 bands). Only the AOI
+  rows of about 45 bands (850–1270 nm, plus 660 nm) are read, with one HTTP
+  range request per band (the files are BSQ). That takes about 30 s per
+  flight line, versus a ~60 GB download per line.
+- **Indicators:**
+  - `ewt980`, `ewt1200`: equivalent water thickness from Beer–Lambert fits,
+    ln R = c₀ + c₁λ − K_w(λ)·EWT, using PROSPECT-D water absorption, over the
+    980 and 1200 nm liquid-water features (vapour-affected bands excluded);
+  - `ndwi`: Gao 1996, 860/1240 nm;
+  - `bd1200`: continuum-removed 1200 nm band depth.
+- **Compositing:** 15 m pixels are aggregated 2 × 2 to the HLS grid. Each
+  cell takes the nearest-nadir line from the date the trait mosaic used.
+  Coverage is 99–100% except 2017 (78%). No seamlines are visible.
+- **Sanity checks:**
+  - the two EWT fits agree at ρ 0.98, and EWT vs HLS NDMI gives ρ 0.72–0.77;
+  - median forest EWT980 is 0.155 cm (2013), 0.156 (2014), 0.125 (2015) and
+    0.092 (2016), then recovers to 0.135 (2017) and 0.118 (2018). This is the
+    canopy water loss reported by Asner et al. 2016.
+
+**Results.** Tree-weighted R² under 1 km block CV, 30 m / 90 m cells:
+
+| Features | Cohort A | Cohort B |
 |---|---|---|
-| S (structure/site/climate) | 0.792 (0.79 / 0.60) | 0.816 (0.55 / 0.51) |
-| H (HLS pre-mortality) | 0.717 | 0.785 |
-| W (WDTS traits; 2013–14 for A, 2018 for B) | 0.708 | 0.769 |
-| M (MASTER Oct 2020) | — | 0.817 (0.77 / 0.56) |
-| S+H | 0.805 | 0.824 |
-| S+W | 0.796 | 0.821 |
-| S+H+W | 0.805 (0.82 / 0.60) | — |
-| S+H+W + June 2015 | 0.809 | — |
-| S+M / S+H+W+M | — | 0.845 / 0.845 |
-| 30 m pixel oracle | 0.705 | 0.760 |
+| S | 0.499 / 0.654 | 0.454 / 0.573 |
+| H alone / W alone / C alone | 0.389 / 0.557, 0.349 / 0.557, 0.250 / 0.400 | 0.334 / 0.446, 0.293 / 0.437, 0.254 / 0.362 |
+| S + C (2013–14; B: 2018) | 0.507 / 0.659 | 0.460 / 0.577 |
+| S + C incl. 2015 (level + Δ2015−2013) | 0.517 / 0.675 | — |
+| S + W (B: 2018) | 0.507 / 0.665 | 0.463 / 0.604 |
+| S + W incl. 2015 | 0.519 / 0.680 | — |
+| S + H (B: 2019–20) | 0.535 / 0.694 | 0.467 / 0.595 |
+| S + H incl. 2015 | 0.560 / 0.712 | — |
+| S + H + C incl. 2015 | 0.562 / 0.715 | 0.481 / 0.602 (S+H+C2018) |
+| S + H + W + C + 2015 | 0.561 / 0.714 | — |
+| S + M / S + H + W + C + M | — | 0.685 / 0.809, 0.691 / 0.813 |
 
-- **Structure and site dominate, as in the literature.** Tree height is
-  the strongest single predictor (AUC 0.64 within site × 200 m elevation
-  strata). This matches Stovall et al. 2019 and Hemming-Schroeder et al. 2023.
-- **Pre-mortality spectral data add little.** WDTS 2013–14 traits add
-  +0.004 AUC to S, and HLS adds +0.013. The gain is larger when transferring
-  to SOAP (0.79 → 0.82), the water-limited site. That matches Queally et al.
-  2025 (GCB, doi:10.1111/gcb.70246), who found traits mattered at SOAP and
-  hardly at TEAK.
-- **Trait directions replicate Queally et al.** Within site × elevation
-  strata, trees in pixels with higher 2013 LMA (AUC 0.59), lower N (0.42),
-  and higher starch and lignin (0.57) died more. Pooled across strata, the
-  LMA sign reverses (0.43), so the elevation/site confound has to be
-  controlled. Sugars and NSC showed nothing (0.48–0.49), unlike Queally's
-  leaf-sugar result.
-- **The best HLS early-warning signal is drying.** An early 2013→2014 fall in
-  NDMI/NDVI (AUC 0.42–0.43) and a rise in RGI (0.585) preceded death by
-  1–4 years, consistent with the canopy-water-loss literature. WDTS has no
-  canopy-water product, and that is the strongest pre-mortality indicator in
-  the literature (Asner et al. 2016; Brodrick & Asner 2017).
-- **Resolution caps tree-level prediction.** A 30 m pixel holds tens of
-  trees. The pixel oracle (AUC 0.71 / 0.76) is below S, because height and
-  size vary within pixels. So 30 m indicators can say which stands are
-  vulnerable, not which trees.
-- **MASTER's large gain in cohort B is mostly early detection.** MASTER
-  NBR/NDMI/SWIR (within-strata AUC 0.31–0.34, i.e. |0.5 − AUC| ≈ 0.17–0.19)
-  and 11.3 µm BT (0.61; hotter pixels died) are the strongest single features.
-  But 2020-10-15 falls between the 2019 and 2021 status years, after the
-  summer 2020 beetle season, so many of those trees were probably already
-  attacked or fading. HLS at the summer-2020 NAIP date is much weaker (0.58),
-  which also suggests the signal developed during 2020.
-- **Transfer across sites fails.** Leave-one-site-out TEAK AUC is about
-  0.55–0.60 for every feature set. The TEAK base rate is low (6–22%), and it
-  has a different species and elevation mix.
+Spearman ρ tracks R². For cohort A at 30 / 90 m it is 0.60 / 0.69 for S and
+0.66 / 0.74 for the full set. Run-to-run noise is about ±0.003 R², from
+HGB's random early-stopping split. The 2015 isolation rows are from
+`leadtime_2015_cv.csv`. Leave-one-site-out R² is negative for every
+feature set because base rates differ (SOAP 49% vs TEAK 23%). Absolute
+levels do not transfer between sites; only rankings do.
 
-**Answer.** Early-warning indicators exist but are weak once structure and
-site are known.
-- **Useful 1–3 years ahead:** pre-drought canopy drying (HLS ΔNDMI) and a
-  "dense, high-LMA, low-N" trait syndrome. They are most useful at
-  water-limited low-elevation sites.
-- **A resilience map needs:**
-  - structure (lidar height and density) and climatic water deficit as the
-    backbone;
-  - canopy water content change (from the 2391 reflectance, or HLS
-    NDMI/SWIR);
-  - the trait syndrome where available.
-- **Next test:** derive canopy water content (EWT) from the WDTS 15 m
-  reflectance for 2013–2015 and test its change against cohort A.
-- **Test cohort B's MASTER signal properly:** repeat with a pre-attack date
-  (MASTER/AVIRIS June 2020, if flown) to separate prediction from early
-  detection.
+- **Structure and site explain most of the predictable variance.** They
+  give R² 0.50 at 30 m and 0.65 at 90 m.
+  - Within site × 200 m elevation strata, mean tree height is the strongest
+    single predictor (ρ 0.28 / 0.33). Stands of taller trees lose a larger
+    fraction.
+  - In cohort B the sign reverses (ρ −0.13 / −0.18). Tall stands had
+    already lost their most susceptible trees.
+- **Canopy water content adds little.**
+  - It gains +0.008 R² at 30 m and +0.005 at 90 m over S with 2013–14 data,
+    and +0.018 / +0.021 when June 2015 is included.
+  - It adds nothing beyond HLS: S+H+H2015 gives 0.560 / 0.712, and adding
+    CWC gives 0.562 / 0.715.
+  - The single-feature signals match the literature:
+    - higher pre-drought water content, i.e. denser, leafier canopies
+      (EWT980 2013 ρ +0.15 / +0.23);
+    - canopy water *loss* 2013→2015 (ρ −0.18 / −0.20). This is Brodrick &
+      Asner's "progressive water stress".
+  - But the early 2013→14 AVIRIS EWT change (ρ −0.08 / −0.10) is weaker than
+    HLS ΔNDMI over the same interval (−0.20 / −0.29).
+  - Caveat: our baseline is June 2013, the drought's second year. CAO's
+    strongest results used 2011 as the baseline.
+- **HLS is the most useful spectral source.** It adds +0.036 / +0.040 R²
+  with 2013–14, and +0.061 / +0.058 with 2015. Its drying signal
+  (ΔNDVI/ΔNDMI/ΔRGI 2013→14, within-strata |ρ| 0.20–0.23 at 30 m) is the
+  strongest pre-mortality spectral indicator.
+- **WDTS traits add +0.008 / +0.011** (+0.020 / +0.026 with 2015). The
+  within-strata directions replicate Queally et al. 2025:
+  - high LMA (ρ +0.24);
+  - low N (−0.22);
+  - high lignin, fiber and starch.
+- **MASTER Oct 2020 is still best read as early detection.** Its gain in
+  cohort B (+0.23 R²) comes from imagery taken after the 2020 beetle season,
+  16 months after the 2019 status and 8 months before 2021.
+
+**Answer.** At the pixel scale, pre-mortality spectral indicators add a
+modest 0.04–0.06 R² over structure and site, and most of it comes from HLS.
+- Canopy water from AVIRIS is physically meaningful and follows the expected
+  trajectory, but it is largely redundant with HLS NDMI/SWIR at 30–90 m.
+- A Sierra-wide predisposition map should therefore be built from:
+  - stand structure (height, density; see `docs/stand_structure_datasets.md`);
+  - climate and topography;
+  - an HLS/Landsat drying signal, with a pre-2013 Landsat 5/7 baseline to
+    capture the 2011→2013 onset.
+- WDTS traits and CWC are secondary refinements at water-limited sites.
 
 ### Literature: remote-sensing indicators of predisposition to drought mortality
 
@@ -997,7 +1022,15 @@ below the HLS pixel.
    - Stage timing: use the NAIP red/gray classification to learn which HLS
      lag (prev/at/next) captures each stage.
 
-### 2. Other follow-ups
+### 2. Sierra-wide stand structure
+
+Candidate pre-drought density and height layers for scaling the
+predisposition model beyond NEON are documented in
+`docs/stand_structure_datasets.md`. Of those, TreeMap 2014, LEMMA GNN 2012,
+LANDFIRE 2014, GLAD height 2010/2015 and TCC 2012–13 are the pre-drought
+candidates.
+
+### 3. Other follow-ups
 
 - **Flight-matched analysis on all three AOIs.** This is queued behind the
   fetch (`hls_results/all_flight/`). Also check the ±20-day window: try ±10

@@ -118,11 +118,14 @@ skips leave-one-AOI-out.
 | `naip/<aoi>/<year>/<item>.tif` (+ `.json`) | NAIP quarter-quads (4-band COG as published) intersecting each AOI, 2012–2022 biennial, from the Planetary Computer. Paused: `sierra_nf` has all 6 years; `stanislaus` has 27 of 42 for 2022; the rest is missing. See `naip_fetch.md`. `_items.json` holds the STAC manifest |
 | `wdts/<aoi>_traits.nc` | WDTS AVIRIS-Classic foliar-trait mosaics ([ORNL DAAC 2403](https://doi.org/10.3334/ORNLDAAC/2403)) on the AOI grid: 14 trait means/sd and QC fractions, one early-summer date per year 2013–2018, for `sierra_nf` and `neon_soap_teak` (Yosemite flight box). From `fetch_wdts_traits.py` |
 | `master/MASTER_WDTS_SeptOct_2020/` | MASTER L1B HDF4 lines 01–04 of flight 2190600 (2020-10-15) over NEON SOAP/TEAK ([ORNL DAAC 1940](https://doi.org/10.3334/ORNLDAAC/1940)) |
+| `wdts/neon_soap_teak_cwc.nc` | Canopy water indicators (EWT at 980/1200 nm, NDWI, 1200 nm band depth) from the WDTS 15 m reflectance ([ORNL 2391](https://doi.org/10.3334/ORNLDAAC/2391)), 30 m, 2013–2018. From `fetch_wdts_cwc.py`. `wdts/aux/prospect_d_spectra.txt` holds the PROSPECT-D absorption coefficients |
+| `stand_structure/` | Small samples of TreeMap 2014/2016/2020, LANDFIRE 2014/2016/2022, GLAD height and the Meta CHM, used to document candidate stand-structure layers (`docs/stand_structure_datasets.md`) |
+| `hls_results/predisposition/` | Pixel-level predisposition results at NEON (cell tables, CV, univariate) |
 
 Code: `src/fetch_hls_aoi.py`, `fetch_landcover_aoi.py`, `ads_labels_aoi.py`,
 `hls_annual_composites.py`, `hls_flight_composites.py`,
 `proto_hls_mortality_signal.py`, `proto_hls_mortality_model.py`,
-`proto_ads_repeat_flights.py`, `fetch_naip_aoi.py`, `hls_naip_composites.py`, `proto_hls_vs_cheng.py`, `proto_hls_vs_hs.py`, `proto_cheng_naip_inference.py`, `fetch_naip_chips.py`, `fetch_naip_chips_ee.py`, `proto_cheng_vs_hs_labels.py`, `proto_cheng_vs_seki.py`, `fetch_wdts_traits.py`, `proto_hls_vs_wdts.py`, `proto_master_quicklook.py`, `proto_predisposition_neon.py`. Config: `config/hls_aois.yml`.
+`proto_ads_repeat_flights.py`, `fetch_naip_aoi.py`, `hls_naip_composites.py`, `proto_hls_vs_cheng.py`, `proto_hls_vs_hs.py`, `proto_cheng_naip_inference.py`, `fetch_naip_chips.py`, `fetch_naip_chips_ee.py`, `proto_cheng_vs_hs_labels.py`, `proto_cheng_vs_seki.py`, `fetch_wdts_traits.py`, `proto_hls_vs_wdts.py`, `proto_master_quicklook.py`, `proto_predisposition_neon.py`, `fetch_wdts_cwc.py`. Config: `config/hls_aois.yml`.
 
 ## Gotchas
 
