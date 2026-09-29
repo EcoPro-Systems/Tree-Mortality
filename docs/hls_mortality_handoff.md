@@ -128,11 +128,14 @@ skips leave-one-AOI-out.
 | `wdts/sierra_nf_cwc.nc` | Canopy water indicators for `sierra_nf` (as for NEON), now with `nadir_dist` |
 | `hls_results/airborne_coverage/` | AVIRIS-C/NG/3/5 flight-line coverage of the AOIs, 2013–2025 (`query_airborne_coverage.py`) |
 | `hls_results/response{,_sierra}/`, `response_traits{,_sierra}/`, `trait_dynamics{,_sierra}/`, `response_transfer/` | Drought response metrics, nested trait models, trait dynamics and cross-drought transfer (`docs/drought_response.md`). `*_mtbs_only/` are earlier runs with the MTBS-only fire mask |
+| `wdts/stanislaus_traits.nc` | Tahoe-box trait mosaics for `stanislaus` (UTM 11 mosaics warped to the UTM 10 grid, nearest neighbour) |
+| `lidar/aso/`, `lidar/lvis2008/`, `lidar/<aoi>_lidar.nc` | ASO 2014–17 structure composite (Ferraz et al. 2020, [Zenodo 3964981](https://doi.org/10.5281/zenodo.3964981): CHM, 10 m metrics, tile boundaries) and LVIS 2008 LDS 1.03 files; structure on the AOI grids from `fetch_lidar_structure.py` (`docs/lidar_coverage.md`) |
+| `hls_results/lidar_coverage/`, `lidar_check/`, `recovery_ablation/`, `trait_stability/`, `response{,_traits}_stanislaus/` | Lidar coverage, trait-vs-lidar checks and structure validation, recovery ablations, 2013–2018 trait stability, Tahoe-box replication (`docs/drought_response.md` §5–8) |
 
 Code: `src/fetch_hls_aoi.py`, `fetch_landcover_aoi.py`, `ads_labels_aoi.py`,
 `hls_annual_composites.py`, `hls_flight_composites.py`,
 `proto_hls_mortality_signal.py`, `proto_hls_mortality_model.py`,
-`proto_ads_repeat_flights.py`, `fetch_naip_aoi.py`, `hls_naip_composites.py`, `proto_hls_vs_cheng.py`, `proto_hls_vs_hs.py`, `proto_cheng_naip_inference.py`, `fetch_naip_chips.py`, `fetch_naip_chips_ee.py`, `proto_cheng_vs_hs_labels.py`, `proto_cheng_vs_seki.py`, `fetch_wdts_traits.py`, `proto_hls_vs_wdts.py`, `proto_master_quicklook.py`, `proto_predisposition_neon.py`, `fetch_wdts_cwc.py`, `fetch_landsat_c2_ee.py`, `fetch_disturbance_aois.py`, `aoi_env_layers.py`, `query_airborne_coverage.py`, `response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`, `proto_response_traits.py`, `proto_response_transfer.py`. Config: `config/hls_aois.yml`.
+`proto_ads_repeat_flights.py`, `fetch_naip_aoi.py`, `hls_naip_composites.py`, `proto_hls_vs_cheng.py`, `proto_hls_vs_hs.py`, `proto_cheng_naip_inference.py`, `fetch_naip_chips.py`, `fetch_naip_chips_ee.py`, `proto_cheng_vs_hs_labels.py`, `proto_cheng_vs_seki.py`, `fetch_wdts_traits.py`, `proto_hls_vs_wdts.py`, `proto_master_quicklook.py`, `proto_predisposition_neon.py`, `fetch_wdts_cwc.py`, `fetch_landsat_c2_ee.py`, `fetch_disturbance_aois.py`, `aoi_env_layers.py`, `query_airborne_coverage.py`, `response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`, `proto_response_traits.py`, `proto_response_transfer.py`, `query_lidar_coverage.py`, `fetch_lidar_structure.py`, `proto_lidar_validation.py`, `proto_trait_stability.py`. Config: `config/hls_aois.yml`.
 
 ## Gotchas
 

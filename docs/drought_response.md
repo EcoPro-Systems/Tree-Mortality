@@ -26,7 +26,8 @@ analysed the same way.
 | Env, terrain, structure, masks | `env/<aoi>_env.nc` | From `aoi_env_layers.py`. BCMv8 water-year CWD/AET/PET/PPT/Tmax and SPEI1–4 (2008–2024, nearest 270 m cell); local SRTM terrain indices (`topo/generated/`); GLAD height 2010, TCC 2010/2013, LANDFIRE 2014 EVH/EVC; NEON lidar tree summaries; NLCD 2013 forest; per-year fire (MTBS, CAL FIRE FRAP, CAL FIRE prescribed burns) and FACTS harvest/salvage, 2000–2025 |
 | Fire and harvest polygons | `fire/disturbance/{frap_fires,rx_fires,facts_harvest}.gpkg` | From `fetch_disturbance_aois.py`: CAL FIRE FRAP perimeters (all sizes), CAL FIRE prescribed-fire perimeters, USFS FACTS timber-harvest activities (EDW) |
 | AVIRIS flight-line inventory | `aviris_locator/AVIRIS-{C,NG}_flight_{table.csv,s.geojson}` | [ORNL DAAC 2140](https://doi.org/10.3334/ORNLDAAC/2140) flight tables (to Aug 2024) |
-| WDTS traits and canopy water | `wdts/<aoi>_traits.nc`, `wdts/<aoi>_cwc.nc` | As before. `fetch_wdts_cwc.py` now also saves `nadir_dist` |
+| WDTS traits and canopy water | `wdts/<aoi>_traits.nc`, `wdts/<aoi>_cwc.nc` | As before. `fetch_wdts_cwc.py` now also saves `nadir_dist`. `stanislaus` traits (Tahoe box, UTM 11) are warped onto the UTM 10 AOI grid with nearest neighbour; no canopy water there yet |
+| Airborne lidar structure | `lidar/<aoi>_lidar.nc`; raw in `lidar/aso/`, `lidar/lvis2008/` | From `fetch_lidar_structure.py`: ASO 2014–17 composite (Ferraz et al. 2020) and LVIS Sep 2008 footprints on the 30 m grids. Coverage and sources: `lidar_coverage.md` |
 
 ## Airborne imaging spectroscopy over the study boxes, 2018–2025 (`hls_results/airborne_coverage/`)
 
@@ -412,6 +413,161 @@ Setup: NEON, 90 m. 24,342 cells had no fire or harvest through 2025.
 - This extends, to continuous responses, the earlier finding that
   forcing-only mortality models fail across years.
 
+### 5. Traits vs airborne lidar structure beyond the NEON trees (`hls_results/lidar_check/`)
+
+§2's lidar check used only the 7,040 NEON cells with 2013 lidar trees. It
+is now scripted (`proto_response_traits.py --structure`) and repeated with
+two NASA airborne lidar sources (`lidar_coverage.md`,
+`fetch_lidar_structure.py`):
+- **LVIS**, Sep 2008: 46% of NEON, pre-drought, ~20 m footprints.
+- **ASO composite** (Airborne Snow Observatory 2014–17, merged by Ferraz et
+  al. 2020): 66% of NEON, 86% of `sierra_nf`. Its snow-off flights are Oct
+  2015 (NEON) and Oct 2016 (`sierra_nf`), during the die-off.
+
+Each run keeps the cells the source covers (≥ 70% of a 90 m cell), adds its
+structure block L to Env+S, and residualizes the traits against Env+S+L.
+
+**The structure layers agree with each other and with the NEON trees**
+(`structure_agreement.csv`, 90 m, Spearman ρ):
+- NEON 2013 tree height vs ASO: 0.83–0.93; vs LVIS: 0.84–0.88. ASO vs LVIS:
+  0.90–0.94. The fraction of trees > 30 m agrees at 0.88–0.93.
+- The wall-to-wall GLAD 2010 height reaches only ρ 0.56–0.67 against any
+  lidar and reads about 10 m low in tall stands. This is the structure
+  that traits could stand in for in §2.
+
+**Does ASO already record the die-off?** (`structure_leakage.csv`). On the
+NEON lidar-tree cells, ASO adds +0.012 [−0.001, 0.026] to the mortality
+model once NEON 2013 structure is in, and LVIS 2008 adds +0.004. Both are
+consistent with 0. ASO cover is unrelated to mortality (ρ ≈ 0); its link to
+mortality is the same "taller stands died more" link as the 2013 trees.
+ASO therefore behaves as a structure control, not as a mortality map.
+
+**Trait gains over Env+S+L** (residual traits Tres in brackets; 95% CI,
+1 km blocks):
+
+| Target | NEON, NEON 2013 trees (7,040 cells) | NEON, LVIS 2008 (21,826) | NEON, ASO (29,004) | `sierra_nf`, ASO (48,731) |
+|---|---|---|---|---|
+| NDMI recovery | +0.064 [0.046, 0.082] (**+0.038** [0.019, 0.057]) | +0.072 [0.059, 0.086] (**+0.048** [0.036, 0.060]) | +0.056 [0.044, 0.067] (**+0.038** [0.029, 0.048]) | +0.037 [0.032, 0.042] (**+0.025** [0.020, 0.029]) |
+| NIRv recovery | +0.072 (+0.047 [0.020, 0.077]) | +0.073 (+0.058 [0.042, 0.077]) | +0.072 (+0.044 [0.026, 0.060]) | +0.046 (+0.031 [0.026, 0.036]) |
+| NDMI stress response | +0.030 (+0.028 [0.017, 0.044]) | +0.034 (+0.022 [0.013, 0.032]) | +0.033 (+0.024 [0.016, 0.034]) | +0.035 (+0.021 [0.016, 0.026]) |
+| NDMI resistance | +0.019 (+0.003 [−0.011, 0.018]) | +0.027 (+0.013 [0.007, 0.020]) | +0.010 (+0.010 [0.004, 0.016]) | +0.022 (+0.012 [0.008, 0.016]) |
+| NDMI resilience | +0.015 (−0.010 [−0.024, 0.001]) | +0.048 (+0.030 [0.022, 0.038]) | +0.027 (+0.015 [0.010, 0.020]) | +0.020 (+0.013 [0.009, 0.017]) |
+| NDMI recovery time | +0.018 (+0.009, n.s.) | +0.018 (+0.009 [0.002, 0.017]) | +0.018 (+0.011 [0.005, 0.016]) | +0.021 (+0.009 [0.005, 0.014]) |
+| Lidar mortality fraction | +0.025 (+0.003, n.s.) | +0.013 (−0.006, n.s.) | +0.026 (+0.021 [0.001, 0.041]) | – |
+
+- **Recovery survives every lidar control, at both AOIs.** The residual-
+  trait gain is +0.025 to +0.048 for NDMI recovery and +0.031 to +0.058 for
+  NIRv recovery. At `sierra_nf` (the first check outside NEON) it is
+  smaller than at NEON but its CI is far from 0.
+- **Stress response also survives everywhere** (+0.021 to +0.028). §2 had
+  not tested it against lidar.
+- **Resistance, resilience and recovery time** keep only small residual
+  gains (≤ +0.015, except LVIS resilience +0.030). They are distinguishable
+  from 0 only with the large LVIS and ASO samples; against the NEON 2013
+  trees they are not.
+- **Mortality:** with the tree-level NEON structure or LVIS the residual
+  gain is 0, as in §2.
+- Lidar structure itself adds +0.02 to +0.09 over the wall-to-wall S for
+  every Landsat target.
+
+### 6. Is the recovery gain the traits themselves? (`hls_results/recovery_ablation/`)
+
+`proto_response_traits.py --ablation`: gain of trait subsets over Env+S (and
+over Env+S+NEON 2013 trees), on cell subsets that exclude likely artifacts,
+for several recovery definitions. 90 m, 95% CIs.
+
+| NDMI recovery, gain over | Full T | T without QC and SD bands | N + LMA only | Green-fraction QC only |
+|---|---|---|---|---|
+| Env+S, NEON (44,079 cells) | +0.065 | +0.057 | +0.026 [0.021, 0.031] | +0.009 |
+| Env+S, `sierra_nf` (58,676) | +0.089 | +0.081 | +0.050 [0.044, 0.056] | +0.014 |
+| Env+S+NEON 2013 trees (7,040) | +0.064 | +0.057 | **+0.045 [0.030, 0.061]** | +0.027 |
+
+- **The QC and SD bands are not the source.** Without them the gain drops
+  by 0.007–0.008. The green-fraction QC alone adds ≤ 0.014 over Env+S.
+- **N and LMA alone carry much of it**: 40–56% of the full gain over Env+S,
+  and 70% of it over NEON lidar structure.
+- **Dead or grey canopy is not the source.** The gain is unchanged in
+  green-dominated cells (2013 QC above its lower quartile: NEON +0.063,
+  `sierra_nf` +0.089). It is +0.079 [0.031, 0.124] in the 1,187 NEON cells
+  with no lidar-dead trees in 2013 (N + LMA over lidar there: +0.058).
+- **Retrieval artifacts are not the source.** Dropping the cells whose N or
+  chlorophyll rose after 2015 (top quintile of mean(2016–17) − 2015) keeps
+  +0.052 (NEON) and +0.081 (`sierra_nf`).
+- **The definition of recovery does not matter.** Post window 2017–18
+  instead of 2017–19: NEON +0.063, `sierra_nf` +0.072. Recovery from
+  2015–16 only: +0.063 / +0.087. The gains for recovery time (+0.036 to
+  +0.047) and NIRv recovery are smaller.
+
+### 7. Stability of slow traits, 2013 vs 2018 (`hls_results/trait_stability/`)
+
+`proto_trait_stability.py`. The question is whether traits from the June
+2018 flight (before the 2020–22 drought) can stand in for 2013 traits in
+models trained on the first drought.
+- **Cells:** undisturbed forest in the top tercile of NDMI resistance, with
+  < 5% lidar-tree mortality at NEON (11,230 NEON and 19,559 `sierra_nf`
+  cells at 90 m).
+- **Method:** traits cross-track normalized per flight line as in §3.
+
+**Spatial pattern (ρ vs 2013, stable cells, 90 m):**
+
+| Trait | NEON 2014 / 2015 (`_v2`) / 2018 | `sierra_nf` 2014 / 2015 / 2018 |
+|---|---|---|
+| LMA | 0.85 / 0.90 / **0.89** | 0.82 / 0.84 / **0.81** |
+| Nitrogen | 0.70 / 0.75 / **0.77** | 0.78 / 0.76 / **0.76** |
+| Lignin | 0.65 / 0.73 / **0.76** | 0.67 / 0.80 / **0.75** |
+| Chlorophyll | 0.64 / 0.47 / **0.68** | 0.65 / 0.67 / **0.66** |
+
+- **The 2018 pattern is as close to 2013 as the next year's flights are.**
+  Five years apart costs nothing beyond the flight-to-flight noise
+  floor.
+- **The level is not stable.** 2018 nitrogen sits +1.1 to +1.3 SD above
+  2013 in stable cells, and chlorophyll −1.1 to −1.5 SD. LMA and lignin are
+  within 0.5 SD. The 2015 `_v2` mosaic is within 0.2 SD of 2013 for every
+  trait, so the offset is between-date calibration (2018 is not a
+  cross-year-calibrated mosaic), not biology. Using 2018 traits in 2013
+  models therefore needs per-date standardization (ranks or z-scores).
+- **Directions carry over, weaker.** Within aridity × elevation strata the
+  ρ of 2018 N with cycle-1 NDMI recovery is +0.22 to +0.25, against +0.37
+  to +0.38 for 2013 N. LMA is −0.20 to −0.23 vs −0.37, and lignin −0.30 vs
+  −0.39 to −0.41. The 2018 traits also reflect the die-off in between.
+
+### 8. Replication in the Tahoe box (`stanislaus`; `hls_results/response{,_traits}_stanislaus/`)
+
+Cycle-1 responses only (2008–2019), with the same masks and models. There is
+no canopy water (W) or lidar here yet. The Tahoe 2013 mosaic (June 4) is not
+cross-year calibrated.
+- **Masks:** FACTS harvest covers 4.1% of forest (NEON 7.5%); 90% of forest
+  is undisturbed through 2019. That leaves 56,275 cells at 90 m.
+- **Env+S explains less** (90 m): NDMI resistance 0.35, recovery 0.29,
+  resilience 0.30; NIRv 0.33–0.44. The drought signal is smaller relative
+  to noise: resistance SD is 1.6× the placebo SD (0.026 vs 0.017), against
+  1.9× at NEON (0.044 vs 0.023) and 2.0× at `sierra_nf` (0.030 vs 0.015).
+
+**Traits add to every response:**
+
+| Target | +T | +Tres |
+|---|---|---|
+| NDMI resistance | **+0.068** [0.054, 0.082] | +0.054 [0.039, 0.070] |
+| NDMI recovery | +0.040 [0.025, 0.056] | +0.022 [0.008, 0.037] |
+| NDMI resilience | +0.029 [0.019, 0.039] | +0.020 [0.010, 0.030] |
+| NIRv resistance | +0.068 | +0.046 |
+| NIRv recovery | +0.054 | +0.031 |
+
+- **The largest gain here is resistance, not recovery.**
+- **Directions only partly replicate.** Structural-carbon traits go with
+  worse recovery, as in the Yosemite box:
+  - residual cellulose ρ −0.12, lignin −0.11, fiber −0.08;
+  - NEON and `sierra_nf`: −0.15 to −0.19.
+- **The nitrogen and LMA directions do not replicate.** Residual N is ρ
+  +0.02 and LMA +0.02 within strata (NEON and `sierra_nf`: N +0.19/+0.21,
+  LMA −0.17/−0.19).
+- The leaf-economics reading of the recovery gain therefore holds in the
+  Yosemite box only. The structural-carbon reading holds in both boxes.
+- **Possible reasons, not yet separated:**
+  - forest type (Tahoe is fir-dominated);
+  - calibration of the non-`_v2` Tahoe mosaics;
+  - the weaker drought signal.
+
 ## Summary
 
 1. **Coverage.**
@@ -427,11 +583,20 @@ Setup: NEON, 90 m. 24,342 cells had no fire or harvest through 2025.
    same forcing follow different trajectories.
 3. **Traits add to climate and structure for every response, at both
    AOIs** (+0.02 to +0.09 R²).
-   - **For recovery the gain is robust to lidar structure:** +0.064 at
-     NEON, with residual traits +0.038.
-   - It follows leaf economics: high N and low LMA recover better.
-   - For mortality and resilience, most of the gain is traits standing in
-     for structure.
+   - **For recovery the gain is robust to lidar structure.** Residual
+     traits add +0.025 to +0.048 over NEON 2013 trees, LVIS 2008 and the
+     ASO composite, at NEON and `sierra_nf` (§5). Stress response also
+     survives (+0.021 to +0.028).
+   - It is not the green-fraction QC, dead canopy or post-2015 retrieval
+     artifacts, and it holds for other recovery definitions. N and LMA
+     alone give 70% of it over lidar structure at NEON (§6).
+   - In the Yosemite box it follows leaf economics: high N and low LMA
+     recover better. In the Tahoe box only the structural-carbon direction
+     (high lignin, cellulose and fiber → worse recovery) replicates, and
+     resistance gains most (§8).
+   - For mortality, the gain is traits standing in for structure. For
+     resistance and resilience, small residual gains (≤ +0.015) remain
+     with the larger lidar samples.
 4. **Trait change vs Landsat change.** For recovery, AVIRIS change beats
    Landsat change head to head. For every response the two are
    complementary. On top of climate, structure and Landsat change, AVIRIS
@@ -440,12 +605,24 @@ Setup: NEON, 90 m. 24,342 cells had no fire or harvest through 2025.
    TEAK. They do not matter more in drier cells.
 6. **Environment-only models do not transfer between droughts**, and the
    resilience ranking reverses. That points to legacies of the first drought.
+7. **Lidar.** Pre-drought airborne lidar exists for most of NEON (LVIS 2008
+   and USFS/NCALM/NEON flights) but only 10% of `sierra_nf` and none of
+   `stanislaus`. The ASO 2014–17 composite covers both Yosemite-box AOIs
+   and does not detectably encode the die-off. GEDI is too sparse at 90 m
+   (`lidar_coverage.md`).
+8. **Slow traits keep their spatial pattern 2013 → 2018** (ρ 0.76–0.89 for
+   N, LMA and lignin in stable cells) but not their level (2018 N +1.2 SD).
+   Applying 2013-trained models to 2018 traits needs per-date
+   standardization (§7).
 
 ## Code
 
 `fetch_landsat_c2_ee.py`, `fetch_disturbance_aois.py`, `aoi_env_layers.py`,
 `query_airborne_coverage.py`,
 `response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`,
-`proto_response_traits.py`, `proto_response_transfer.py`. Run from `src/` in
+`proto_response_traits.py` (`--structure`, `--ablation`),
+`proto_response_transfer.py`, `query_lidar_coverage.py`,
+`fetch_lidar_structure.py`, `proto_lidar_validation.py`,
+`proto_trait_stability.py`. Run from `src/` in
 the `ecopro` env. Earth Engine uses the Cloud project `ecopro-509818`.
 `shap` is installed with pip.

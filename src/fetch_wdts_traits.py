@@ -3,8 +3,10 @@
 Fetch WDTS AVIRIS-Classic foliar trait mosaics (Zheng et al. 2025, ORNL DAAC
 2403, doi:10.3334/ORNLDAAC/2403) onto the HLS AOI grids.
 
-The mosaics are 30 m COGs in UTM 10/11 on a 30 m lattice that coincides with
-the HLS AOI grids, so AOI windows are read directly (no resampling). One file
+The mosaics are 30 m COGs on a 30 m lattice that coincides with the HLS AOI
+grids when the UTM zone matches, so AOI windows are read directly (no
+resampling). The Tahoe box mosaics are in UTM 11 while the stanislaus AOI is
+in UTM 10; those are warped with nearest neighbour (<= 15 m shift). One file
 per flight box, date and trait, 12 bands:
 
   1 mean, 2 sd (200 PLSR permutations)
@@ -40,6 +42,8 @@ import rasterio
 import xarray as xr
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from rasterio.enums import Resampling
+from rasterio.vrt import WarpedVRT
 from rasterio.windows import Window, from_bounds
 
 from util import load_config
@@ -85,9 +89,11 @@ def search(session, bbox):
     return out
 
 
-def read_bands(url, transform, shape, env, bands):
+def read_bands(url, transform, shape, env, bands, epsg):
     """Read bands of the AOI window (grids coincide); NODATA outside the
-    file extent"""
+    file extent. Mosaics in another UTM zone than the AOI (the Tahoe box is
+    in zone 11, the stanislaus AOI in zone 10) are warped onto the AOI grid
+    with nearest-neighbour resampling."""
     x0, y1 = transform.c, transform.f
     x1 = x0 + shape[1] * transform.a
     y0 = y1 + shape[0] * transform.e
@@ -95,6 +101,14 @@ def read_bands(url, transform, shape, env, bands):
         try:
             with rasterio.Env(**env):
                 with rasterio.open('/vsicurl/' + url) as ds:
+                    if ds.crs.to_epsg() != epsg:
+                        with WarpedVRT(ds, crs=f'EPSG:{epsg}',
+                                       transform=transform,
+                                       width=shape[1], height=shape[0],
+                                       resampling=Resampling.nearest,
+                                       src_nodata=NODATA,
+                                       nodata=NODATA) as vrt:
+                            return vrt.read(bands).astype(np.float32)
                     assert ds.transform.a == transform.a
                     w = from_bounds(x0, y0, x1, y1, ds.transform)
                     r0, c0 = int(round(w.row_off)), int(round(w.col_off))
@@ -124,7 +138,7 @@ def fetch_aoi(name, aoi, config, found, outpath, env, jobs):
 
     # Authenticate once, serially, before the parallel reads
     read_bands(found[(box, DATES[box][years[0]], 'LMA')], transform,
-               (4, 4), env, [1])
+               (4, 4), env, [1], aoi['epsg'])
 
     def run(job):
         y, t = job
@@ -132,7 +146,7 @@ def fetch_aoi(name, aoi, config, found, outpath, env, jobs):
         if t == 'LMA':
             bands += list(FLAG_BANDS.values()) + [12]
         return job, read_bands(found[(box, DATES[box][y], t)], transform,
-                               shape, env, bands)
+                               shape, env, bands, aoi['epsg'])
 
     ny = len(years)
     data = {}
