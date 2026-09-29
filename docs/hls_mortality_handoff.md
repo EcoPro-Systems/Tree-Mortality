@@ -121,11 +121,18 @@ skips leave-one-AOI-out.
 | `wdts/neon_soap_teak_cwc.nc` | Canopy water indicators (EWT at 980/1200 nm, NDWI, 1200 nm band depth) from the WDTS 15 m reflectance ([ORNL 2391](https://doi.org/10.3334/ORNLDAAC/2391)), 30 m, 2013–2018. From `fetch_wdts_cwc.py`. `wdts/aux/prospect_d_spectra.txt` holds the PROSPECT-D absorption coefficients |
 | `stand_structure/` | Small samples of TreeMap 2014/2016/2020, LANDFIRE 2014/2016/2022, GLAD height and the Meta CHM, used to document candidate stand-structure layers (`docs/stand_structure_datasets.md`) |
 | `hls_results/predisposition/` | Pixel-level predisposition results at NEON (cell tables, CV, univariate) |
+| `landsat_composites/<aoi>_{c2,c2l7,c2oli}_doy{182-273,145-190}.nc` | Landsat C2 L2 summer and June composites, 2008–2025, on the AOI grids (Earth Engine). `c2l7` = Landsat 7 only, `c2oli` = Landsat 8/9 only. From `fetch_landsat_c2_ee.py` |
+| `env/<aoi>_env.nc` | BCMv8 climate (2008–2024), local SRTM terrain indices, GLAD/TCC/LANDFIRE structure, NEON lidar tree summaries, NLCD forest, and per-year fire (MTBS, FRAP, prescribed) and FACTS harvest/salvage masks. From `aoi_env_layers.py` |
+| `fire/disturbance/{frap_fires,rx_fires,facts_harvest}.gpkg` | CAL FIRE FRAP and prescribed-fire perimeters and USFS FACTS timber harvests over the AOIs. From `fetch_disturbance_aois.py` |
+| `aviris_locator/` | AVIRIS Flight Line Locator tables and GeoJSON ([ORNL DAAC 2140](https://doi.org/10.3334/ORNLDAAC/2140)) |
+| `wdts/sierra_nf_cwc.nc` | Canopy water indicators for `sierra_nf` (as for NEON), now with `nadir_dist` |
+| `hls_results/airborne_coverage/` | AVIRIS-C/NG/3/5 flight-line coverage of the AOIs, 2013–2025 (`query_airborne_coverage.py`) |
+| `hls_results/response{,_sierra}/`, `response_traits{,_sierra}/`, `trait_dynamics{,_sierra}/`, `response_transfer/` | Drought response metrics, nested trait models, trait dynamics and cross-drought transfer (`docs/drought_response.md`). `*_mtbs_only/` are earlier runs with the MTBS-only fire mask |
 
 Code: `src/fetch_hls_aoi.py`, `fetch_landcover_aoi.py`, `ads_labels_aoi.py`,
 `hls_annual_composites.py`, `hls_flight_composites.py`,
 `proto_hls_mortality_signal.py`, `proto_hls_mortality_model.py`,
-`proto_ads_repeat_flights.py`, `fetch_naip_aoi.py`, `hls_naip_composites.py`, `proto_hls_vs_cheng.py`, `proto_hls_vs_hs.py`, `proto_cheng_naip_inference.py`, `fetch_naip_chips.py`, `fetch_naip_chips_ee.py`, `proto_cheng_vs_hs_labels.py`, `proto_cheng_vs_seki.py`, `fetch_wdts_traits.py`, `proto_hls_vs_wdts.py`, `proto_master_quicklook.py`, `proto_predisposition_neon.py`, `fetch_wdts_cwc.py`. Config: `config/hls_aois.yml`.
+`proto_ads_repeat_flights.py`, `fetch_naip_aoi.py`, `hls_naip_composites.py`, `proto_hls_vs_cheng.py`, `proto_hls_vs_hs.py`, `proto_cheng_naip_inference.py`, `fetch_naip_chips.py`, `fetch_naip_chips_ee.py`, `proto_cheng_vs_hs_labels.py`, `proto_cheng_vs_seki.py`, `fetch_wdts_traits.py`, `proto_hls_vs_wdts.py`, `proto_master_quicklook.py`, `proto_predisposition_neon.py`, `fetch_wdts_cwc.py`, `fetch_landsat_c2_ee.py`, `fetch_disturbance_aois.py`, `aoi_env_layers.py`, `query_airborne_coverage.py`, `response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`, `proto_response_traits.py`, `proto_response_transfer.py`. Config: `config/hls_aois.yml`.
 
 ## Gotchas
 

@@ -28,3 +28,5 @@ dependencies:
   - skops
   - werkzeug
   - pyhdf  # MASTER L1B (HDF4); installed with pip in the existing env
+  - shap  # SHAP importances for the response models; installed with pip in the existing env
+  - earthengine-api  # Landsat C2 composites and structure layers (fetch_landsat_c2_ee.py, aoi_env_layers.py)

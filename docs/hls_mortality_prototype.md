@@ -718,9 +718,12 @@ die-off began, is added separately. Cohort B uses 2018–2020.
   Coverage is 99–100% except 2017 (78%). No seamlines are visible.
 - **Sanity checks:**
   - the two EWT fits agree at ρ 0.98, and EWT vs HLS NDMI gives ρ 0.72–0.77;
-  - median forest EWT980 is 0.155 cm (2013), 0.156 (2014), 0.125 (2015) and
-    0.092 (2016), then recovers to 0.135 (2017) and 0.118 (2018). This is the
-    canopy water loss reported by Asner et al. 2016.
+  - median EWT980 over all AOI pixels is 0.155 cm (2013), 0.156 (2014),
+    0.125 (2015) and 0.092 (2016), then recovers to 0.135 (2017) and 0.118
+    (2018). Over NLCD forest pixels it is 0.184, 0.181, 0.148, 0.109, 0.145
+    and 0.134 cm. (An earlier version of this note labelled the all-pixel
+    series "forest".) This is the canopy water loss reported by Asner et al.
+    2016.
 
 **Results.** Tree-weighted R² under 1 km block CV, 30 m / 90 m cells:
 

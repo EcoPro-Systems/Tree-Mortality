@@ -228,6 +228,7 @@ def main(configfile, outputdir, name, years, jobs, kw_table):
     data = {k: np.full((len(years),) + shape, np.nan, np.float32)
             for k in keys}
     src = np.full((len(years),) + shape, -1, np.int16)
+    nadir = np.full((len(years),) + shape, np.nan, np.float32)
     lines_used = {}
     for i, y in enumerate(years):
         cands = []
@@ -251,6 +252,7 @@ def main(configfile, outputdir, name, years, jobs, kw_table):
             for k in keys:
                 data[k][i][take] = m[k][take]
             src[i][take] = len(names) - 1
+            nadir[i][take] = m['dist'][take]
             best[take] = score[take]
             click.echo(f'[{name}] {y} {h["name"]}: {take.sum()} cells '
                        f'({time.time() - t:.0f} s)')
@@ -262,10 +264,12 @@ def main(configfile, outputdir, name, years, jobs, kw_table):
     ys = transform.f + (np.arange(shape[0]) + 0.5) * transform.e
     ds = xr.Dataset(
         {**{k: (('year', 'y', 'x'), v) for k, v in data.items()},
-         'source_line': (('year', 'y', 'x'), src)},
+         'source_line': (('year', 'y', 'x'), src),
+         'nadir_dist': (('year', 'y', 'x'), nadir)},
         coords={'year': years, 'y': ys, 'x': xs},
         attrs={'crs': f'EPSG:{aoi["epsg"]}', 'transform': list(transform)[:6],
                'source': 'doi:10.3334/ORNLDAAC/2391',
+               'nadir_dist_units': '15 m pixels from swath centre',
                **{f'lines_{y}': ','.join(v) for y, v in lines_used.items()}})
     out = outputdir / f'{name}_cwc.nc'
     ds.to_netcdf(out.with_suffix('.tmp.nc'),
