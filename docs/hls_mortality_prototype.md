@@ -498,7 +498,10 @@ HS sample pixels gives ρ = 0.42–0.47.
   the positional-tolerance test does not support that.)
 - **Positional tolerance does not help.** Allowing 2–5 m finds more dead
   trees but flags proportionally more live ones, so AUC is flat. NAIP
-  misregistration is not the main limit.
+  misregistration is not the main limit: the measured NAIP-vs-lidar offset
+  at NEON is only about 1.3 m (median; p90 2.5 m), and correcting it
+  changes the scores negligibly (see "Alignment of HS crowns with NAIP"
+  below).
 - **Dead-foliage vs bare trees.** Among dead trees on the SEKI transects,
   those still holding dead foliage (F1–F3) and bare ones (T0–T3) are
   detected at similar rates, 64–65% within 5 m.
@@ -508,6 +511,78 @@ HS sample pixels gives ρ = 0.42–0.47.
   cumulative-mortality target, calibrate with the systematic references
   (HS pixels, SEKI transects) rather than treating model counts as
   absolute.
+
+### Alignment of HS crowns with NAIP (`hls_results/hs_naip_alignment/`)
+
+HS crown polygons overlaid on NAIP can look visibly offset from the crowns
+in the image, which raises the question of whether the crown-level HS
+scores above can be trusted. `proto_hs_naip_alignment.py` measures the
+offset directly on the NEON chips (`naip_chips/neon_soap_teak/{2016,2018}`)
+and the model energy in `hls_results/cheng_naip_neon/`.
+
+**Checks.**
+- **CRS.** With PROJ's network grids off (the default), EPSG:32611 → 26911
+  is a 0.0 m shift in pyproj (WGS84 and NAD83 treated as identical). The
+  true datum difference, about 1 m, is below the other effects here. With
+  `PROJ_NETWORK=ON` (set by some conda activation scripts) pyproj applies a
+  grid shift of about 0.8 m at NEON, which changes the per-chip offsets
+  slightly; the numbers below are with the network off.
+- **HS polygons vs HS lidar treetops.** The 2017 crown polygons are unbiased
+  relative to their own treetops (`xlas2013`/`ylas2013`: median dx −0.08 m,
+  dy 0.0 m; median distance 1.2 m), and their area matches `ca2017`.
+- **NAIP vs lidar, rigid offset per chip** (`--step register`). NAIP NDVI
+  is cross-correlated with a canopy mask of 1.01 M HS treetops (disks of
+  `ca2013`) over ±15 m.
+  - About 30% of chips have a reliable peak (peak-to-sidelobe ratio ≥ 6).
+    There the offset is **median 1.3 m, p90 2.5 m, mostly about +1.2 m east
+    and −0.6 m north** (NAIP relative to lidar), about 2–3 NAIP pixels.
+  - It is consistent within each NAIP quarter-quad (sd 0.2–1.5 m).
+  - Low-PSR chips give noisy offsets; 14–23 of them per year hit the ±15 m
+    search limit.
+- **Height dependence** (`--step height`). Short (5–15 m), medium
+  (15–30 m) and tall (> 30 m) trees register within about 0.6 m of one
+  another (p90 ≤ 1.3 m). **There is no meaningful relief displacement.**
+- **Model dead mask vs HS crowns, stacked over all chips** (`--step
+  stacked`). Model dead pixels are **4.6× (2016) and 5.5× (2018) enriched
+  on HS dead crowns**, peaking at (+1.2, −0.6) m, the same offset as the
+  NDVI check. Live crowns are depleted (0.37–0.50×). About half the excess
+  lies within 5 m of the peak, roughly one dead-crown radius.
+
+**Re-score with the offset corrected** (`--step rescore`;
+`rescore_crowns.csv`, `rescore_pixels.csv`). `none` reproduces
+`cheng_vs_hs_labels/crown_metrics.csv`; `chip` shifts each crown by its
+chip's offset (the quad median where PSR < 6); `quad` shifts every crown by
+the quad median. The same correction is available in
+`proto_cheng_vs_hs_labels.py --shift chip|quad`.
+
+| NAIP | Offset | AUC (all) | AUC (high certainty) | Dead detected | Live flagged | 30 m ρ |
+|---|---|---|---|---|---|---|
+| 2016 | none | 0.695 | 0.738 | 43.6% | 6.6% | 0.459 |
+|  | per chip | 0.699 | 0.741 | 44.3% | 6.4% | 0.456 |
+|  | per quad | 0.698 | 0.741 | 44.1% | 6.5% | 0.456 |
+| 2018 | none | 0.699 | 0.721 | 45.4% | 7.5% | 0.465 |
+|  | per chip | 0.706 | 0.726 | 46.0% | 6.8% | 0.468 |
+|  | per quad | 0.704 | 0.725 | 45.8% | 7.0% | 0.468 |
+
+**The change is negligible:** AUC rises by at most 0.006, dead detected by
+under 1 percentage point, and the 30 m sample-pixel ρ changes by ≤ 0.004.
+
+**Interpretation.**
+- The systematic NAIP-vs-lidar misregistration at NEON is about 1–2 m.
+  The crown-level HS results stand, and offsets of this size do not matter
+  at aggregated (30 m and coarser) scales.
+- The apparent misalignment when HS polygons are drawn on NAIP comes from
+  several things together:
+  - lidar-segmented crown perimeters do not match visible crown edges; NAIP
+    crowns include a sunlit side and shadows, and HS treetops often fall in
+    shadow;
+  - many trees labelled dead in 2017 had shed foliage or fallen by 2018, so
+    they appear in NAIP as gaps rather than gray crowns;
+  - windows chosen to show dense dead clusters are where polygons overlap
+    most.
+- **Still open:** the same check for the SEKI field points (GPS error plus
+  NAIP registration), and whether registration differs between SOAP and
+  TEAK.
 
 ### Comparison with published accuracy of the Cheng et al. models
 
@@ -995,6 +1070,31 @@ below the HLS pixel.
      `sierra_nf`, so 2020 validation there is limited to unburned pixels.
      `stanislaus` and `lassen` are mostly unaffected in 2020; Dixie (2021)
      affects `lassen` only from 2021.
+   - **Multi-year test run.** The model was run on the same 1.2 km window
+     (centre of quarter-quad `m_3711945_se`, the `cheng_naip_test` crop)
+     cut from every `naip/sierra_nf/<year>` quarter-quad
+     (`proto_cheng_naip_inference.py --by-year --no-cells --bounds ...`;
+     about 25 s for all six years on MPS):
+
+     | Year | 2012 | 2014 | 2016 | 2018 | 2020 | 2022 |
+     |---|---|---|---|---|---|---|
+     | Dead crowns ha⁻¹ | 2.4 | 0.7 | 7.3 | 17.7 | 19.9 | 41.9 |
+     | Dead canopy | 0.8% | 0.1% | 2.4% | 4.7% | 4.4% | 9.5% |
+
+     - NAIP is 1 m in 2012 and 2014 and 0.6 m from 2016. The 2020 count
+       (2,866 crowns) matches `cheng_naip_test`.
+     - **The window burned completely in the Creek Fire** (ignition
+       2020-09-05, after the 2020-08-03 flight): MTBS and CAL FIRE FRAP
+       perimeters both cover all of it, and FACTS harvest polygons
+       intersect it. The 2022 value is fire-killed trees plus salvage.
+     - The 1 m years suggest a background (false-positive) rate of about
+       1–2 dead crowns ha⁻¹.
+   - **Masking for a multi-year reference.** Mask the NAIP-derived
+     reference with MTBS plus CAL FIRE FRAP perimeters of all sizes (MTBS
+     alone misses small fires) plus FACTS harvest and treatment polygons;
+     this matters most for Creek (`sierra_nf`, from 2020) and Dixie
+     (`lassen`, from 2021). Expect a background of about 1–2 dead crowns
+     ha⁻¹ in the 1 m NAIP years (2012, 2014).
 2. **(Superseded: public weights were found and run locally; see "Running the Cheng model locally" above.) If no weights, retrain.** Hand-digitize dead crowns in a few NAIP
    quarter-quads per AOI and year (their labelling protocol is in the paper),
    starting from the bundled example labels. Train with

@@ -26,6 +26,11 @@ the 30 m lattice). Where lines overlap, each 30 m cell takes the line from
 the primary date (the one the trait mosaic used) and, among those, the one
 where the cell is closest to the swath centre (nearest nadir).
 
+Lines are in the UTM zone of their own footprint. A line in another zone
+than the AOI (e.g. the easternmost Tahoe-box lines, UTM 11, over the UTM 10
+stanislaus AOI) is processed on its native 15 m grid over the AOI footprint
+and then warped (area average) onto the 30 m AOI grid.
+
 Output: <aoi>_cwc.nc with dims (year, y, x), plus source line per cell.
 """
 import os
@@ -36,18 +41,26 @@ import numpy as np
 import requests
 import rasterio
 import xarray as xr
+from affine import Affine
 from pathlib import Path
+from rasterio.warp import reproject, transform_bounds, Resampling
 from concurrent.futures import ThreadPoolExecutor
 
 from util import load_config
 from fetch_hls_aoi import aoi_grid
+from fetch_wdts_traits import BOX
 
 BASE = ('https://data.ornldaac.earthdata.nasa.gov/protected/wdts/'
         'WDTS_AVIRIS-C_L2_corrected/data/')
-# Acquisition dates per year: primary first, then fallback (same campaign)
-DATES = {2013: ['130612', '130626'], 2014: ['140603'],
-         2015: ['150601', '150602'], 2016: ['160621'], 2017: ['170607'],
-         2018: ['180622']}
+# Acquisition dates per flight box and year: primary first (the date the
+# trait mosaic used), then fallback (same campaign)
+DATES = {
+    'yosemite': {2013: ['130612', '130626'], 2014: ['140603'],
+                 2015: ['150601', '150602'], 2016: ['160621'],
+                 2017: ['170607'], 2018: ['180622']},
+    'tahoe': {2013: ['130604'], 2014: ['140602'], 2015: ['150608', '150611'],
+              2016: ['160609'], 2017: ['170620'], 2018: ['180621']},
+}
 MAX_RUN = 25
 WIN_980 = (865, 1085, (925, 970))
 WIN_1200 = (1100, 1265, (1110, 1160))
@@ -131,13 +144,27 @@ def band_nearest(wl, target):
     return int(np.argmin(np.abs(wl - target)))
 
 
-def line_metrics(sess, h, transform, shape, kw_wl, kw, jobs):
+def line_metrics(sess, h, transform, shape, kw_wl, kw, jobs, epsg):
     """30 m metrics for one line over the AOI (NaN outside), and the
     distance of each 30 m cell from the swath centre (in 15 m pixels)"""
     res = h['res']
     assert res == 15 and abs(transform.a) == 30
-    ax0, ay1 = transform.c, transform.f
     ny15, nx15 = shape[0] * 2, shape[1] * 2
+    line_epsg = 32600 + h['zone']
+    same_zone = line_epsg == epsg
+    if same_zone:
+        ax0, ay1 = transform.c, transform.f
+    else:
+        # AOI bounds in the line's zone, plus a margin of two 15 m pixels
+        x0, y1 = transform.c, transform.f
+        x1, y0 = x0 + shape[1] * transform.a, y1 + shape[0] * transform.e
+        bx0, by0, bx1, by1 = transform_bounds(f'EPSG:{epsg}',
+                                              f'EPSG:{line_epsg}',
+                                              x0, y0, x1, y1, densify_pts=21)
+        ax0 = h['x0'] + np.floor((bx0 - h['x0']) / res) * res - 2 * res
+        ay1 = h['y0'] - np.floor((h['y0'] - by1) / res) * res + 2 * res
+        ny15 = int(np.ceil((ay1 - by0) / res)) + 2
+        nx15 = int(np.ceil((bx1 - ax0) / res)) + 2
     # Line rows/cols that fall in the AOI (15 m)
     r0 = int(round((h['y0'] - ay1) / res))
     c0 = int(round((ax0 - h['x0']) / res))
@@ -194,6 +221,10 @@ def line_metrics(sess, h, transform, shape, kw_wl, kw, jobs):
         centre = np.nanmean(np.where(valid, cols, np.nan), axis=1)
     dist = np.where(valid, np.abs(cols - centre[:, None]), np.nan)
 
+    if not same_zone:
+        return warp_to_aoi(m, dist, valid, h, rr0, cc0, transform, shape,
+                           line_epsg, epsg)
+
     # Paste into the AOI 15 m canvas, then aggregate 2 x 2 to 30 m
     def to30(a):
         canvas = np.full((ny15, nx15), np.nan, np.float32)
@@ -203,6 +234,30 @@ def line_metrics(sess, h, transform, shape, kw_wl, kw, jobs):
             return np.nanmean(c, axis=(1, 3)), np.isfinite(c).sum(axis=(1, 3))
     out = {k: to30(v)[0] for k, v in m.items()}
     out['dist'], out['npx'] = to30(dist.astype(np.float32))
+    return out
+
+
+def warp_to_aoi(m, dist, valid, h, rr0, cc0, transform, shape, line_epsg,
+                epsg):
+    """Area-average a line's 15 m window (another UTM zone) onto the 30 m
+    AOI grid. npx is the number of valid 15 m pixels per 30 m cell (the
+    valid fraction x 4, as in the same-zone path)."""
+    res = h['res']
+    src_t = Affine(res, 0, h['x0'] + cc0 * res, 0, -res, h['y0'] - rr0 * res)
+
+    def warp(a, nodata=np.nan):
+        dst = np.full(shape, np.nan, np.float32)
+        reproject(np.ascontiguousarray(a, np.float32), dst,
+                  src_transform=src_t, src_crs=f'EPSG:{line_epsg}',
+                  src_nodata=nodata, dst_transform=transform,
+                  dst_crs=f'EPSG:{epsg}', dst_nodata=np.nan,
+                  resampling=Resampling.average)
+        return dst
+    out = {k: warp(v) for k, v in m.items()}
+    out['dist'] = warp(dist.astype(np.float32))
+    # Valid fraction: 1 valid, 0 invalid inside the window, NaN outside
+    frac = warp(valid.astype(np.float32), nodata=None)
+    out['npx'] = np.nan_to_num(frac * 4).round().astype(np.int64)
     return out
 
 
@@ -223,7 +278,8 @@ def main(configfile, outputdir, name, years, jobs, kw_table):
     transform, shape = aoi_grid(aoi, config['size_m'], config['resolution'])
     kw_wl, kw = load_kw(kw_table)
     sess = session()
-    years = list(years) or sorted(DATES)
+    dates = DATES[BOX[name]]
+    years = list(years) or sorted(dates)
     keys = ['ewt980', 'ewt1200', 'ndwi', 'bd1200', 'ndvi']
     data = {k: np.full((len(years),) + shape, np.nan, np.float32)
             for k in keys}
@@ -232,16 +288,15 @@ def main(configfile, outputdir, name, years, jobs, kw_table):
     lines_used = {}
     for i, y in enumerate(years):
         cands = []
-        for rank, date in enumerate(DATES[y]):
+        for rank, date in enumerate(dates[y]):
             for h in find_lines(sess, date):
-                if h['zone'] != aoi['epsg'] - 32600:
-                    continue
                 cands.append((rank, h))
         best = np.full(shape, np.inf)
         names = []
         for rank, h in cands:
             t = time.time()
-            m = line_metrics(sess, h, transform, shape, kw_wl, kw, jobs)
+            m = line_metrics(sess, h, transform, shape, kw_wl, kw, jobs,
+                             aoi['epsg'])
             if m is None:
                 continue
             score = rank * 1e6 + m['dist']

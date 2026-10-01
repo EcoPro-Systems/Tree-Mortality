@@ -22,6 +22,16 @@ CONFIG = Path(__file__).resolve().parent.parent / 'config/hls_aois.yml'
 RES = 30
 N_SPLITS = 5
 MIN_VALID = 0.7  # fraction of 30 m pixels valid for a coarser cell
+# AOIs held out for the 2020-22 drought: their cycle-2 responses stay
+# unexamined until models fixed on the other AOIs are applied to them
+HELD_OUT = {'stanislaus', 'seki'}
+
+
+def check_cycle2(aoi, allow=False):
+    """Refuse to build 2020-22 responses for a held-out AOI"""
+    if aoi in HELD_OUT and not allow:
+        raise RuntimeError(f'{aoi} is held out for the 2020-22 drought; '
+                           'its cycle-2 responses are not computed')
 
 
 def aoi_info(name, configfile=CONFIG):
@@ -85,16 +95,55 @@ def wr2(y, p, w=None):
 
 
 def oof_predict(df, cols, target, blocks, weight=None, seed=0,
-                n_splits=N_SPLITS):
-    """Out-of-fold predictions with GroupKFold over spatial blocks"""
+                n_splits=N_SPLITS, fold_features=None):
+    """Out-of-fold predictions with GroupKFold over spatial blocks.
+
+    fold_features(df, train_mask) -> (n, k) array: extra features that
+    must be recomputed in each fold from the training cells only (e.g.
+    neighbour_mean)."""
     p = np.full(len(df), np.nan)
     X, y = df[cols].values, df[target].values
     w = None if weight is None else df[weight].values
     for tr, te in GroupKFold(n_splits=n_splits).split(X, groups=df[blocks]):
+        Xf = X
+        if fold_features is not None:
+            train = np.zeros(len(df), bool)
+            train[tr] = True
+            Xf = np.column_stack([X, fold_features(df, train)])
         m = hgb(seed)
-        m.fit(X[tr], y[tr], sample_weight=None if w is None else w[tr])
-        p[te] = m.predict(X[te])
+        m.fit(Xf[tr], y[tr], sample_weight=None if w is None else w[tr])
+        p[te] = m.predict(Xf[te])
     return p
+
+
+def neighbour_mean(df, target, train, radius_m, cell_m, block='block1000',
+                   min_n=5):
+    """Mean target of the training cells within radius_m of each cell,
+    leaving out the cell's own spatial block (a spatial-neighbourhood
+    baseline that uses no training label from the test block).
+
+    Disk sums come from an FFT convolution on the cell grid; the own-block
+    sum is then subtracted, which is exact while the block fits inside the
+    disk (1 km blocks, radius >= 1.5 km)."""
+    from scipy.signal import fftconvolve
+    rows, cols = df.cell_row.values, df.cell_col.values
+    y = df[target].values
+    tm = train & np.isfinite(y)
+    shape = (rows.max() + 1, cols.max() + 1)
+    s, n = np.zeros(shape), np.zeros(shape)
+    s[rows[tm], cols[tm]] = y[tm]
+    n[rows[tm], cols[tm]] = 1
+    r = int(radius_m // cell_m)
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    k = (yy ** 2 + xx ** 2 <= r * r).astype(float)
+    S = fftconvolve(s, k, 'same')[rows, cols]
+    N = np.round(fftconvolve(n, k, 'same'))[rows, cols]
+    b = df[block].values
+    bs = pd.Series(np.where(tm, y, 0.0)).groupby(b).transform('sum').values
+    bn = pd.Series(tm.astype(float)).groupby(b).transform('sum').values
+    N = N - bn
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return np.where(N >= min_n, (S - bs) / N, np.nan)
 
 
 def block_sums(y, preds, w, blocks):
@@ -142,14 +191,18 @@ def bootstrap_r2(y, preds, blocks, w=None, n_boot=1000, seed=0,
 
 
 def ladder(df, target, fsets, blocks, weight=None, seed=0, n_boot=1000,
-           pairs=None, extra_blocks=()):
+           pairs=None, extra_blocks=(), fold_features=None):
     """Fit each feature set, then R² with CIs and the R² gain of each step.
 
     fsets: ordered {name: [cols]}. pairs defaults to consecutive steps.
     extra_blocks: further block columns to bootstrap over (e.g. 5 km).
+    fold_features: {name: callable} of per-fold features (oof_predict) for
+    the named sets, which may then have no columns of their own.
     Returns (rows, preds)."""
     d = df[df[target].notna()]
-    preds = {name: oof_predict(d, cols, target, blocks, weight, seed)
+    ff = fold_features or {}
+    preds = {name: oof_predict(d, cols, target, blocks, weight, seed,
+                               fold_features=ff.get(name))
              for name, cols in fsets.items()}
     names = list(fsets)
     pairs = pairs or list(zip(names[:-1], names[1:]))

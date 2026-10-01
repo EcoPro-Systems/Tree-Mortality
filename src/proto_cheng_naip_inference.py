@@ -22,6 +22,14 @@ AttachConv, predict/ordinal_watershed.py):
 
 Runs on Apple MPS if available, else CPU.
 
+--crop processes a centred square of N px; --bounds processes a box given
+in map coordinates (in --bounds-crs, default each image's own CRS), e.g. to
+cut the same window from every NAIP year:
+  python src/proto_cheng_naip_inference.py <outputdir> \
+      /Volumes/Earth04/ecopro/naip/sierra_nf/20{12,14,16,18,20,22}/*3711945_se*.tif \
+      --by-year --no-cells --bounds <minx> <miny> <maxx> <maxy> \
+      --bounds-crs EPSG:26911
+
 Outputs per quad in <outputdir>: <quad>_energy.tif (uint8), <quad>_crowns.csv
 (centroid, area per instance), and a combined cells_100m.csv comparing
 per-cell dead-crown density and dead-canopy fraction with the Cheng maps.
@@ -40,7 +48,8 @@ from tqdm import tqdm
 from pathlib import Path
 from pyproj import Transformer
 from scipy import ndimage
-from rasterio.windows import Window
+from rasterio.warp import transform_bounds
+from rasterio.windows import Window, from_bounds
 from skimage.segmentation import watershed
 
 PATCH = 256
@@ -223,8 +232,16 @@ def cell_table(quad, crowns_df, energy, profile, cheng_dir):
 @click.option('--batch-size', default=16, show_default=True)
 @click.option('--crop', default=0, show_default=True,
               help='If > 0, only process a centered crop of this many px')
+@click.option('--bounds', nargs=4, type=float, default=None,
+              help='Only process this box: minx miny maxx maxy')
+@click.option('--bounds-crs', default=None,
+              help='CRS of --bounds (e.g. EPSG:26911); default: each '
+                   "image's own CRS")
 def main(outputdir, quads, no_cells, by_year, model_dir, cheng_dir, device,
-         batch_size, crop):
+         batch_size, crop, bounds, bounds_crs):
+
+    if crop and bounds:
+        raise click.UsageError('--crop and --bounds are mutually exclusive')
 
     if device == 'auto':
         device = 'mps' if torch.backends.mps.is_available() else 'cpu'
@@ -243,14 +260,22 @@ def main(outputdir, quads, no_cells, by_year, model_dir, cheng_dir, device,
         if (odir / f'{q.stem}_energy.tif').exists():
             continue
         src = q
-        if crop:
+        if crop or bounds:
             with rasterio.open(q) as ds:
-                r0, c0 = (ds.height - crop) // 2, (ds.width - crop) // 2
-                win = Window(c0, r0, crop, crop)
+                if crop:
+                    r0, c0 = (ds.height - crop) // 2, (ds.width - crop) // 2
+                    win = Window(c0, r0, crop, crop)
+                    src = outputdir / f'{q.stem}_crop{crop}.tif'
+                else:
+                    b = bounds if bounds_crs is None else \
+                        transform_bounds(bounds_crs, ds.crs, *bounds)
+                    win = from_bounds(*b, ds.transform)
+                    win = win.round_offsets().round_lengths().intersection(
+                        Window(0, 0, ds.width, ds.height))
+                    src = outputdir / f'{q.stem}_bounds.tif'
                 prof = ds.profile.copy()
-                prof.update(height=crop, width=crop,
+                prof.update(height=int(win.height), width=int(win.width),
                             transform=ds.window_transform(win))
-                src = outputdir / f'{q.stem}_crop{crop}.tif'
                 with rasterio.open(src, 'w', **prof) as dst:
                     dst.write(ds.read(window=win))
         t0 = time.time()

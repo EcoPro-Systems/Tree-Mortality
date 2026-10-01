@@ -21,7 +21,14 @@ Feature sets (all using only years <= 2020):
   l30_ads    l30_hist + ads
 
 Models are HistGradientBoostingRegressor, evaluated with 5-fold spatial
-block CV (3 km blocks, all AOIs pooled) and leave-one-AOI-out.
+block CV (3 km blocks, all AOIs pooled) and leave-one-AOI-out. random_state
+is fixed because early stopping uses a random validation split when
+n > 10,000.
+
+Outputs (outputdir): cells.csv (features and targets per 100 m cell),
+cv_predictions.csv (aoi, row, col and the block-CV out-of-fold prediction
+pred_<target>_<feature set> for each cell, in cells.csv row order),
+univariate_spearman.csv, model_cv.csv, hls_vs_cheng.pdf.
 """
 import os
 import click
@@ -171,7 +178,8 @@ def evaluate(df, feats, target):
     out, preds = [], pd.Series(np.nan, index=d.index)
     gkf = GroupKFold(n_splits=5)
     for fold, (tr, te) in enumerate(gkf.split(d, groups=d.block)):
-        m = HistGradientBoostingRegressor(max_iter=400, learning_rate=0.05)
+        m = HistGradientBoostingRegressor(max_iter=400, learning_rate=0.05,
+                                          random_state=0)
         m.fit(d.iloc[tr][feats], d.iloc[tr][target])
         preds.iloc[te] = m.predict(d.iloc[te][feats])
     out.append(dict(cv='block5', held_out='all',
@@ -180,7 +188,8 @@ def evaluate(df, feats, target):
                     mae=mean_absolute_error(d[target], preds), n=len(d)))
     for aoi in sorted(d.aoi.unique()):
         tr, te = d[d.aoi != aoi], d[d.aoi == aoi]
-        m = HistGradientBoostingRegressor(max_iter=400, learning_rate=0.05)
+        m = HistGradientBoostingRegressor(max_iter=400, learning_rate=0.05,
+                                          random_state=0)
         m.fit(tr[feats], tr[target])
         p = m.predict(te[feats])
         out.append(dict(cv='leave_aoi', held_out=aoi,
@@ -252,6 +261,11 @@ def main(configfile, outputdir, composites, labels, landcover, cheng_dir,
                   f'rho {rows[0]["spearman"]:.3f}')
     res = pd.DataFrame(res)
     res.to_csv(outputdir / 'model_cv.csv', index=False)
+    # Out-of-fold predictions, so maps can be redrawn without re-fitting
+    oof = df[['aoi', 'row', 'col']].copy()
+    for (target, fs), p in preds.items():
+        oof[f'pred_{target}_{fs}'] = p.reindex(df.index)
+    oof.to_csv(outputdir / 'cv_predictions.csv', index=False)
     make_plots(df, uni, res, preds, grids, outputdir)
 
 

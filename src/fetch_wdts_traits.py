@@ -31,6 +31,10 @@ dims (year, y, x):
   qc_all, qc_fc, ... qc_edge uint8 percent of 15 m subpixels passing (255
                              outside the footprint), from the LMA file
   flight_id                  int16 (-1 outside the footprint)
+
+--date BOX:YEAR=DATE swaps the acquisition for one year (e.g.
+yosemite:2013=20130612, the non-_v2 version of the 2013 primary date), and
+--suffix writes <aoi>_traits_<suffix>.nc so the default file is kept.
 """
 import os
 import re
@@ -127,17 +131,18 @@ def read_bands(url, transform, shape, env, bands, epsg):
             time.sleep(BACKOFF * attempt)
 
 
-def fetch_aoi(name, aoi, config, found, outpath, env, jobs):
+def fetch_aoi(name, aoi, config, found, outpath, env, jobs, dates,
+              years=None):
     transform, shape = aoi_grid(aoi, config['size_m'], config['resolution'])
     box = BOX[name]
-    years = sorted(DATES[box])
+    years = sorted(years or dates)
     jobs_list = [(y, t) for y in years for t in TRAITS]
     for y, t in jobs_list:
-        if (box, DATES[box][y], t) not in found:
-            raise click.ClickException(f'missing {box} {DATES[box][y]} {t}')
+        if (box, dates[y], t) not in found:
+            raise click.ClickException(f'missing {box} {dates[y]} {t}')
 
     # Authenticate once, serially, before the parallel reads
-    read_bands(found[(box, DATES[box][years[0]], 'LMA')], transform,
+    read_bands(found[(box, dates[years[0]], 'LMA')], transform,
                (4, 4), env, [1], aoi['epsg'])
 
     def run(job):
@@ -145,7 +150,7 @@ def fetch_aoi(name, aoi, config, found, outpath, env, jobs):
         bands = [1, 2]
         if t == 'LMA':
             bands += list(FLAG_BANDS.values()) + [12]
-        return job, read_bands(found[(box, DATES[box][y], t)], transform,
+        return job, read_bands(found[(box, dates[y], t)], transform,
                                shape, env, bands, aoi['epsg'])
 
     ny = len(years)
@@ -180,7 +185,7 @@ def fetch_aoi(name, aoi, config, found, outpath, env, jobs):
         coords={'year': years, 'y': ys, 'x': xs},
         attrs={'crs': f'EPSG:{aoi["epsg"]}', 'transform': list(transform)[:6],
                'flightbox': box,
-               'dates': ','.join(DATES[box][y] for y in years),
+               'dates': ','.join(dates[y] for y in years),
                'source': 'doi:10.3334/ORNLDAAC/2403'},
     )
     enc = {k: {'zlib': True, 'complevel': 4} for k in data}
@@ -202,7 +207,20 @@ def fetch_aoi(name, aoi, config, found, outpath, env, jobs):
 @click.option('--list', 'list_only', is_flag=True,
               help='List available acquisitions per AOI and exit')
 @click.option('--overwrite', is_flag=True)
-def main(configfile, outputdir, aois, jobs, list_only, overwrite):
+@click.option('--date', 'date_swaps', multiple=True,
+              help='Swap one acquisition, as BOX:YEAR=DATE')
+@click.option('-y', '--year', 'years', multiple=True, type=int,
+              help='Years to fetch (default: all in DATES)')
+@click.option('--suffix', default='',
+              help='Write <aoi>_traits_<suffix>.nc')
+def main(configfile, outputdir, aois, jobs, list_only, overwrite,
+         date_swaps, years, suffix):
+    box_dates = {b: dict(v) for b, v in DATES.items()}
+    for swap in date_swaps:
+        m = re.fullmatch(r'(\w+):(\d{4})=(\d{8}(?:_v2)?)', swap)
+        if m is None:
+            raise click.BadParameter(f'{swap}: expected BOX:YEAR=DATE')
+        box_dates[m.group(1)][int(m.group(2))] = m.group(3)
     config = load_config(configfile)
     os.makedirs(outputdir, exist_ok=True)
     env = gdal_env(str(outputdir / '.cookies.txt'))
@@ -221,11 +239,13 @@ def main(configfile, outputdir, aois, jobs, list_only, overwrite):
         if name not in BOX:
             click.echo(f'[{name}] no WDTS flight box configured; skipping')
             continue
-        outpath = outputdir / f'{name}_traits.nc'
+        outpath = outputdir / (f'{name}_traits_{suffix}.nc' if suffix
+                               else f'{name}_traits.nc')
         if outpath.exists() and not overwrite:
             click.echo(f'[{name}] {outpath} exists; skipping')
             continue
-        fetch_aoi(name, aoi, config, found, outpath, env, jobs)
+        fetch_aoi(name, aoi, config, found, outpath, env, jobs,
+                  box_dates[BOX[name]], years)
         click.echo(f'[{name}] wrote {outpath}')
 
 

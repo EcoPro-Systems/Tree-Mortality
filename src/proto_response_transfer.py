@@ -47,7 +47,9 @@ TARGETS = [f'{v}_{m}' for v in ('ndmi', 'nirv')
 INDICES = ['ndmi', 'nirv', 'ndvi']
 
 
-def build_cycle(aoi, k, c, valid):
+def build_cycle(aoi, k, c, valid, allow_held_out=False):
+    if c == 2:
+        rc.check_cycle2(aoi, allow_held_out)
     cy = CYCLES[c]
     env = rc.open_env(aoi)
     comp = xr.open_dataset(rc.E / 'landsat_composites' /

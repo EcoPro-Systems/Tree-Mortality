@@ -15,6 +15,11 @@ legitimately die by 2018.
 Crown level: fraction of each crown's pixels with model energy > 0.
 Pixel level: labeled dead fraction per sampled 30 m pixel vs the model's
 dead-canopy fraction within that pixel.
+
+--shift chip|quad translates the crowns and sample pixels by the NAIP-minus-
+lidar offsets measured by proto_hs_naip_alignment.py (offsets_<year>.csv in
+--offsets-dir) before scoring: per chip (quad median where the chip's
+correlation peak is weak), or the median of the chip's NAIP quarter-quad.
 """
 import os
 import glob
@@ -32,13 +37,19 @@ from rasterio.windows import from_bounds
 THRESHOLDS = [0.05, 0.1, 0.25, 0.5]
 
 
-def overlap_fraction(geoms, energy_files):
+def overlap_fraction(geoms, energy_files, shifts=None):
     """Fraction of each geometry's pixels with energy > 0 (NaN if no
-    raster fully contains it)"""
+    raster fully contains it). shifts optionally maps a chip name (energy
+    file name without _energy.tif) to a (dx, dy) translation in m applied
+    to the geometries before scoring them in that chip"""
     out = np.full(len(geoms), np.nan)
     for f in energy_files:
         with rasterio.open(f) as ds:
             g = geoms.to_crs(ds.crs)
+            if shifts:
+                dx, dy = shifts.get(Path(f).name[:-len('_energy.tif')],
+                                    (0.0, 0.0))
+                g = g.translate(dx, dy)
             b = ds.bounds
             inside = ((g.bounds.minx > b.left) & (g.bounds.maxx < b.right)
                       & (g.bounds.miny > b.bottom) & (g.bounds.maxy < b.top))
@@ -62,7 +73,12 @@ def overlap_fraction(geoms, energy_files):
 @click.argument('outputdir', type=click.Path(path_type=Path))
 @click.option('--hs-dir', type=click.Path(path_type=Path), default=(
     '/Volumes/Earth04/ecopro/hemming_schroeder2023/data/training'))
-def main(energydir, outputdir, hs_dir):
+@click.option('--shift', default='none', show_default=True,
+              type=click.Choice(['none', 'chip', 'quad']),
+              help='Correct crowns for the measured NAIP-minus-lidar offset')
+@click.option('--offsets-dir', type=click.Path(path_type=Path), default=(
+    '/Volumes/Earth04/ecopro/hls_results/hs_naip_alignment'))
+def main(energydir, outputdir, hs_dir, shift, offsets_dir):
 
     os.makedirs(outputdir, exist_ok=True)
     trees = gpd.read_file(hs_dir / 'trees_2017_training_filtered_labeled.shp')
@@ -74,8 +90,14 @@ def main(energydir, outputdir, hs_dir):
     rows, prow = [], []
     for year in (2016, 2018):
         files = sorted(glob.glob(str(energydir / str(year) / '*_energy.tif')))
-        trees[f'frac_{year}'] = overlap_fraction(trees.geometry, files)
-        sites[f'model_dead_{year}'] = overlap_fraction(sites.geometry, files)
+        shifts = None
+        if shift != 'none':
+            # Imported here: proto_hs_naip_alignment imports this module
+            from proto_hs_naip_alignment import chip_shifts
+            shifts = chip_shifts(offsets_dir / f'offsets_{year}.csv', shift)
+        trees[f'frac_{year}'] = overlap_fraction(trees.geometry, files, shifts)
+        sites[f'model_dead_{year}'] = overlap_fraction(sites.geometry, files,
+                                                       shifts)
         for subset, t in [('all', trees), ('high certainty', trees[trees.high_certainty])]:
             t = t[np.isfinite(t[f'frac_{year}'])]
             dead = t.live == 0

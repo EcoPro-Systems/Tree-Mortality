@@ -46,8 +46,20 @@ lidar mortality fraction (trees live in 2013, dead by 2017-18).
                ndmi_recovery_1718 (post 2017-18); ndmi_recovery_late
                (post 2017-19 vs 2015-16); ndmi_rectime; nirv_recovery
 
+6. Spatial-neighbourhood baseline (--neighbour): B0 is the mean response
+   of the training cells within --neighbour-radius of a cell, outside its
+   own 1 km block, recomputed in every fold (response_common.
+   neighbour_mean). Ladder B0 | Env+S | Env+S+B0 | Env+S+T | Env+S+B0+T |
+   Env+S+B0+Tres: do traits add skill that spatial autocorrelation of the
+   response does not already give?
+
 Traits use the 2013 v2 mosaic (cross-track normalized, as in
-proto_trait_dynamics.py).
+proto_trait_dynamics.py). Alternatives for checks: --traits / --cwc read
+other trait and canopy-water files (e.g. the non-v2 2013 mosaic, or
+simulated retrievals), --trait-year sets the year that forms T (the next
+year forms T14), and --line-z also z-scores each trait within each flight
+line (removes between-line level offsets, and any real between-line
+contrast with them).
 
     python proto_response_traits.py $E/hls_results/response_traits \
         -a neon_soap_teak --scale 3
@@ -88,39 +100,65 @@ STRUCTURES = {'neon2013': S_LIDAR, 'aso': S_ASO, 'lvis2008': S_LVIS}
 MIN_COVER = 0.7  # fraction of a cell's pixels with lidar
 
 
-def trait_layers(aoi, valid, k):
+def trait_paths(aoi, traits=None, cwc=None):
+    return (traits or rc.E / 'wdts' / f'{aoi}_traits.nc',
+            cwc or rc.E / 'wdts' / f'{aoi}_cwc.nc')
+
+
+def line_z(a, line):
+    """z-score a layer within each flight line"""
+    out = a.copy()
+    for lid in np.unique(line[line >= 0]):
+        m = (line == lid) & np.isfinite(a)
+        if m.sum() < 100:
+            continue
+        out[m] = (a[m] - a[m].mean()) / (a[m].std() or 1)
+    return out
+
+
+def trait_year(d):
+    """The year that forms T (the earliest T_qcfc_<year> column)"""
+    return min(int(c.rsplit('_', 1)[1]) for c in d.columns
+               if c.startswith('T_qcfc_'))
+
+
+def trait_layers(aoi, valid, k, paths=None, y0=2013, per_line=False):
     transform, shape, _ = rc.aoi_info(aoi)
     env = rc.open_env(aoi)
-    tr = xr.open_dataset(rc.E / 'wdts' / f'{aoi}_traits.nc')
-    f = rc.E / 'wdts' / f'{aoi}_cwc.nc'
-    cwc = xr.open_dataset(f) if f.exists() else None
+    ftr, fcwc = paths or trait_paths(aoi)
+    tr = xr.open_dataset(ftr)
+    cwc = xr.open_dataset(fcwc) if Path(fcwc).exists() else None
     elev = env.elevation.values
     layers = {}
-    for y in (2013, 2014):
+    for y in (y0, y0 + 1):
+        if y not in tr.year.values:
+            continue
         fid = tr.flight_id.sel(year=y).values
         for t in TRAITS:
             a = tr[f'{t}_mean'].sel(year=y).values.astype(np.float32)
             a[fid <= 0] = np.nan
-            layers[f'T_{t}_{y}'] = crosstrack_normalize(a, fid, elev,
-                                                        transform)
-        if y == 2013:
+            a = crosstrack_normalize(a, fid, elev, transform)
+            layers[f'T_{t}_{y}'] = line_z(a, fid) if per_line else a
+        if y == y0:
             for t in SD_TRAITS:
                 a = tr[f'{t}_sd'].sel(year=y).values.astype(np.float32)
                 layers[f'T_{t}_sd_{y}'] = np.where(fid > 0, a, np.nan)
         qc = tr.qc_fc.sel(year=y).values.astype(np.float32)
         layers[f'T_qcfc_{y}'] = np.where((fid > 0) & (qc <= 100), qc / 100,
                                          np.nan)
-        if cwc is not None:
+        if cwc is not None and y in cwc.year.values:
+            src = cwc.source_line.sel(year=y).values
             ewt = cwc.ewt980.sel(year=y).values.astype(np.float32)
-            layers[f'W_ewt_{y}'] = crosstrack_normalize(
-                ewt, cwc.source_line.sel(year=y).values, elev, transform)
+            ewt = crosstrack_normalize(ewt, src, elev, transform)
+            layers[f'W_ewt_{y}'] = line_z(ewt, src) if per_line else ewt
     return rc.cell_table(layers, valid, k)
 
 
-def build(aoi, k, response_dir, dynamics_dir):
+def build(aoi, k, response_dir, dynamics_dir, paths=None, y0=2013,
+          per_line=False):
     env = rc.open_env(aoi)
     valid = rc.undisturbed(env, 2019)
-    t = trait_layers(aoi, valid, k)
+    t = trait_layers(aoi, valid, k, paths, y0, per_line)
     m = pd.read_csv(response_dir / f'metrics_{aoi}_{rc.RES * k}m.csv')
     m.columns = [c.replace('resistance1516', 'resistance_late')
                  for c in m.columns]
@@ -201,11 +239,11 @@ ABLATION_TARGETS = ['ndmi_recovery', 'ndmi_recovery_1718',
 RISE_Q = 0.8
 
 
-def trait_rise(aoi, valid, k):
+def trait_rise(aoi, valid, k, paths=None):
     """Per cell: mean(2016-17) - 2015 of N and chlorophyll"""
     transform, shape, _ = rc.aoi_info(aoi)
     env = rc.open_env(aoi)
-    tr = xr.open_dataset(rc.E / 'wdts' / f'{aoi}_traits.nc')
+    tr = xr.open_dataset((paths or trait_paths(aoi))[0])
     elev = env.elevation.values
     layers = {}
     for t in ('Nitrogen', 'Chlorophylls'):
@@ -220,10 +258,11 @@ def trait_rise(aoi, valid, k):
         ['cell_row', 'cell_col', 'rise_Nitrogen', 'rise_Chlorophylls']]
 
 
-def run_ablation(d, aoi, k, base, n_boot, label):
+def run_ablation(d, aoi, k, base, n_boot, label, paths=None):
     """Gain of trait subsets over base, on several cell subsets and
     recovery definitions"""
     d = d.copy()
+    y0 = trait_year(d)
     with np.errstate(all='ignore'):
         drought = d[[f'ndmi_{y}' for y in (2014, 2015, 2016)]].mean(1)
         late = d[['ndmi_2015', 'ndmi_2016']].mean(1)
@@ -232,19 +271,20 @@ def run_ablation(d, aoi, k, base, n_boot, label):
         d['ndmi_recovery_late'] = d[[f'ndmi_{y}' for y in
                                      (2017, 2018, 2019)]].mean(1) - late
     env = rc.open_env(aoi)
-    rise = trait_rise(aoi, rc.undisturbed(env, 2019), k)
+    rise = trait_rise(aoi, rc.undisturbed(env, 2019), k, paths)
     d = d.merge(rise, on=['cell_row', 'cell_col'], how='left')
     _, T, _ = feature_sets(d)
-    qc_sd = ['T_qcfc_2013'] + [f'T_{t}_sd_2013' for t in SD_TRAITS]
+    qc = f'T_qcfc_{y0}'
+    qc_sd = [qc] + [f'T_{t}_sd_{y0}' for t in SD_TRAITS]
     tsets = {'T': T, 'T-noQC-SD': [c for c in T if c not in qc_sd],
-             'N+LMA': ['T_Nitrogen_2013', 'T_LMA_2013'],
-             'QC': ['T_qcfc_2013']}
-    q = d.T_qcfc_2013.quantile(0.25)
+             'N+LMA': [f'T_Nitrogen_{y0}', f'T_LMA_{y0}'],
+             'QC': [qc]}
+    q = d[qc].quantile(0.25)
     no_rise = ~((d.rise_Nitrogen > d.rise_Nitrogen.quantile(RISE_Q)) |
                 (d.rise_Chlorophylls >
                  d.rise_Chlorophylls.quantile(RISE_Q)))
     subsets = {'all': np.ones(len(d), bool),
-               'green': (d.T_qcfc_2013 > q).values,
+               'green': (d[qc] > q).values,
                'no_rise': no_rise.values}
     if 'lidar_dead2013' in d:
         subsets['no_dead2013'] = (d.lidar_dead2013 == 0).values
@@ -268,14 +308,51 @@ def run_ablation(d, aoi, k, base, n_boot, label):
     return rows
 
 
-def feature_sets(d):
-    T = [f'T_{t}_2013' for t in TRAITS] + \
-        [f'T_{t}_sd_2013' for t in SD_TRAITS] + ['T_qcfc_2013']
-    T14 = [f'T_{t}_2014' for t in TRAITS] + ['T_qcfc_2014']
-    W = [c for c in ('W_ewt_2013', 'W_ewt_2014') if c in d]
+def neighbour_ladder(d, targets, n_boot, radius, scale_m):
+    """Trait gains over a spatial-neighbourhood baseline (B0)"""
+    _, T, _ = feature_sets(d)
+    R = residualize(d, T, 'block1000')
+    d = pd.concat([d, R], axis=1)
     es = ENV + S_WALL
-    fs = {'B1': B1, 'Env': ENV, 'Env+S': es, 'Env+S+T': es + T,
-          'Env+S+T+T14': es + T + T14}
+    fs = {'B0': [], 'Env+S': es, 'Env+S+B0': es, 'Env+S+T': es + T,
+          'Env+S+B0+T': es + T, 'Env+S+B0+Tres': es + list(R.columns)}
+    pairs = [('B0', 'Env+S'), ('Env+S', 'Env+S+B0'), ('Env+S', 'Env+S+T'),
+             ('Env+S+B0', 'Env+S+B0+T'), ('Env+S+B0', 'Env+S+B0+Tres')]
+    rows = []
+    for t in targets:
+        if t not in d or t == 'mort_frac' or d[t].notna().sum() < 500:
+            continue
+        sub = d[d[t].notna() & np.isfinite(d[t])]
+
+        def nb(df, train, t=t):
+            return rc.neighbour_mean(df, t, train, radius, scale_m)[:, None]
+        ff = {k: nb for k in fs if 'B0' in k}
+        r, _ = rc.ladder(sub, t, fs, 'block1000', n_boot=n_boot,
+                         pairs=pairs, fold_features=ff)
+        rows += r
+        g = {f'{x["features"]}-{x["compare"]}': x for x in r
+             if x['compare'] and x['boot_blocks'] == 'block1000'}
+        a = {x['features']: x['r2'] for x in r
+             if not x['compare'] and x['boot_blocks'] == 'block1000'}
+        click.echo(f'  {t:20s} B0 {a["B0"]:.3f} Env+S {a["Env+S"]:.3f} '
+                   f'Env+S+B0 {a["Env+S+B0"]:.3f}  ' + '  '.join(
+                       f'{k} {g[k]["r2"]:+.3f} [{g[k]["lo"]:+.3f},'
+                       f'{g[k]["hi"]:+.3f}]' for k in (
+                           'Env+S+B0+T-Env+S+B0', 'Env+S+B0+Tres-Env+S+B0')))
+    return rows
+
+
+def feature_sets(d):
+    y0 = trait_year(d)
+    T = [f'T_{t}_{y0}' for t in TRAITS] + \
+        [f'T_{t}_sd_{y0}' for t in SD_TRAITS] + [f'T_qcfc_{y0}']
+    T = [c for c in T if d[c].notna().any()]  # simulated files lack SD/QC
+    T14 = [f'T_{t}_{y0 + 1}' for t in TRAITS] + [f'T_qcfc_{y0 + 1}']
+    W = [c for c in (f'W_ewt_{y0}', f'W_ewt_{y0 + 1}') if c in d]
+    es = ENV + S_WALL
+    fs = {'B1': B1, 'Env': ENV, 'Env+S': es, 'Env+S+T': es + T}
+    if all(c in d for c in T14):
+        fs['Env+S+T+T14'] = es + T + T14
     if W:  # canopy water (not yet fetched for every AOI)
         fs.update({'Env+S+W': es + W, 'Env+S+T+W': es + T + W})
     return fs, T, W
@@ -333,14 +410,46 @@ def shap_summary(d, cols, target, max_n=20000):
 @click.option('--ablation', is_flag=True,
               help='Run only the recovery ablations (with --structure: '
                    'on top of each lidar source)')
+@click.option('--traits', 'traits_path', type=click.Path(path_type=Path),
+              help='Trait file (default wdts/<aoi>_traits.nc; one AOI)')
+@click.option('--cwc', 'cwc_path', type=click.Path(path_type=Path),
+              help='Canopy-water file (default wdts/<aoi>_cwc.nc; one AOI)')
+@click.option('--trait-year', default=2013, show_default=True,
+              help='Year of the traits that form T')
+@click.option('--line-z', is_flag=True,
+              help='z-score each trait within each flight line')
+@click.option('--neighbour', is_flag=True,
+              help='Run only the spatial-neighbourhood baseline ladder')
+@click.option('--neighbour-radius', default=2000, show_default=True)
+@click.option('--gains-only', is_flag=True,
+              help='Ladder gains only: skip the conditional gains, residual '
+                   'directions and SHAP')
 def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
-         n_boot, structures, ablation):
+         n_boot, structures, ablation, traits_path, cwc_path, trait_year,
+         line_z, neighbour, neighbour_radius, gains_only):
+    if (traits_path or cwc_path) and len(aois) > 1:
+        raise click.UsageError('--traits/--cwc take a single --aoi')
     outputdir.mkdir(parents=True, exist_ok=True)
     rows, cond_rows, res_rows, imp_rows = [], [], [], []
     for aoi in aois:
         for k in scales:
             scale_m = rc.RES * k
-            d = build(aoi, k, response_dir, dynamics_dir)
+            paths = trait_paths(aoi, traits_path, cwc_path)
+            d = build(aoi, k, response_dir, dynamics_dir, paths, trait_year,
+                      line_z)
+            if neighbour:
+                r = neighbour_ladder(d, targets, n_boot, neighbour_radius,
+                                     scale_m)
+                for x in r:
+                    x.update(aoi=aoi, scale_m=scale_m,
+                             radius_m=neighbour_radius)
+                f = outputdir / 'neighbour.csv'
+                old = pd.read_csv(f) if f.exists() else pd.DataFrame()
+                if len(old):
+                    old = old[~((old.aoi == aoi) & (old.scale_m == scale_m) &
+                                (old.radius_m == neighbour_radius))]
+                pd.concat([old, pd.DataFrame(r)]).to_csv(f, index=False)
+                continue
             if ablation:
                 runs = [('Env+S', d, ENV + S_WALL)]
                 for src in structures:
@@ -351,7 +460,8 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
                 for label, dd, base in runs:
                     click.echo(f'[{aoi} {scale_m} m] ablation, base {label}'
                                f': {len(dd)} cells')
-                    r = run_ablation(dd, aoi, k, base, n_boot, label)
+                    r = run_ablation(dd, aoi, k, base, n_boot, label,
+                                     paths)
                     for x in r:
                         x.update(aoi=aoi, scale_m=scale_m)
                     f = outputdir / 'ablation.csv'
@@ -412,6 +522,11 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
                     f'{gain[key]["hi"]:+.3f}]' for name, key in (
                         ('+T', 'Env+S+T-Env+S'), ('+W', 'Env+S+W-Env+S'),
                         ('+Tres', 'Env+S+Tres-Env+S')) if key in gain))
+
+                if gains_only:
+                    pd.DataFrame(rows).to_csv(
+                        outputdir / 'response_traits_ladder.csv', index=False)
+                    continue
 
                 # Conditional gains
                 splits = [('arid', v) for v in ('wet', 'mid', 'dry')]

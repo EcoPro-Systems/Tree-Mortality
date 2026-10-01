@@ -21,12 +21,12 @@ search result, including footprints and acquisition dates.
 | `sierra_nf` | 30/30 | 30/30 | 30/30 | 30/30 | 30/30 | 30/30 |
 | `stanislaus` | 0/42 | 0/42 | 0/42 | 0/42 | 0/42 | 27/42 |
 | `lassen` | 0/35 | 0/35 | 0/35 | 0/35 | 0/35 | 0/35 |
-| `neon_soap_teak` | 0/28 | 0/28 | 0/28 | 0/28 | 0/28 | 0/28 |
+| `neon_soap_teak` | 0/28 | 0/28 | 1/28 | 12/28 | 0/28 | 0/28 |
 
 - Files are about 0.2 GB each for 2012/2014 and about 0.45–0.53 GB for
   2016–2022.
-- **Remaining:** 603 files, about 230 GB. A priority subset of 2016, 2018
-  and 2020 for the three unfinished AOIs is about 145 GB.
+- **Remaining:** 590 files, about 225 GB. A priority subset of 2016, 2018
+  and 2020 for the three unfinished AOIs is 302 files, about 140 GB.
 - 2016 and 2018 bracket the die-off peak, and 2020 is the Cheng et al.
   reference year.
 

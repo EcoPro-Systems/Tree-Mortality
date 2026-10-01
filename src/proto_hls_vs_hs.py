@@ -160,7 +160,7 @@ def part1(comp, lab, forest, ref, trees, res):
                     tr = dt[(dt.year != Y) & (dt.fold != f)]
                     te = dt[(dt.year == Y) & (dt.fold == f)]
                     m = HistGradientBoostingRegressor(
-                        max_iter=300, learning_rate=0.05)
+                        max_iter=300, learning_rate=0.05, random_state=0)
                     m.fit(tr[feat_cols], tr[target])
                     pred[te.index] = m.predict(te[feat_cols])
                 te = dt[dt.year == Y]
@@ -221,7 +221,8 @@ def part2(config, composites, labels, landcover, cheng_dir, ref, trees,
     train = pd.concat(train, ignore_index=True)
     feat_cols = [c for c in train.columns
                  if c not in ('cheng_pct_dead', 'aoi', 'block')]
-    model = HistGradientBoostingRegressor(max_iter=400, learning_rate=0.05)
+    model = HistGradientBoostingRegressor(max_iter=400, learning_rate=0.05,
+                                          random_state=0)
     model.fit(train[feat_cols], train.cheng_pct_dead)
 
     comp = xr.open_dataset(composites / f'{AOI}{suffix}').load()
