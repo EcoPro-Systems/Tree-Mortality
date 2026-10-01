@@ -59,7 +59,14 @@ other trait and canopy-water files (e.g. the non-v2 2013 mosaic, or
 simulated retrievals), --trait-year sets the year that forms T (the next
 year forms T14), and --line-z also z-scores each trait within each flight
 line (removes between-line level offsets, and any real between-line
-contrast with them).
+contrast with them). --raw-block replaces T with the bands and indices of a
+single-date reflectance file on the AOI grid (e.g. a Landsat 8 scene from
+fetch_landsat_c2_ee.py --scene): what such a scene adds with no trait
+retrieval at all. --save-preds also writes each ladder's out-of-fold
+predictions (preds_<run>.csv.gz: cell, blocks, target, observed value and
+one column per feature set), so that runs on different trait files can be
+compared on the same cells and bootstrap draws (proto_spaceborne_sim.py
+compare).
 
     python proto_response_traits.py $E/hls_results/response_traits \
         -a neon_soap_teak --scale 3
@@ -98,6 +105,21 @@ S_LVIS = ['lvis_rh100_mean', 'lvis_rh100_max', 'lvis_rh50_mean',
           'lvis_rh25_mean', 'lvis_rh50_ratio', 'lvis_frac_tall']
 STRUCTURES = {'neon2013': S_LIDAR, 'aso': S_ASO, 'lvis2008': S_LVIS}
 MIN_COVER = 0.7  # fraction of a cell's pixels with lidar
+PRED_KEYS = ['cell_row', 'cell_col', 'block1000', 'block5000']
+
+
+def pred_frame(sub, target, preds):
+    """Out-of-fold predictions of one ladder, with the cell keys"""
+    out = sub.loc[preds.index, PRED_KEYS].copy()
+    out.insert(len(PRED_KEYS), 'target', target)
+    out.insert(len(PRED_KEYS) + 1, 'y', sub.loc[preds.index, target])
+    return pd.concat([out, preds.astype(np.float32)], axis=1)
+
+
+def write_preds(frames, path):
+    if frames:
+        pd.concat(frames, ignore_index=True).to_csv(
+            path, index=False, float_format='%.6g')
 
 
 def trait_paths(aoi, traits=None, cwc=None):
@@ -154,6 +176,23 @@ def trait_layers(aoi, valid, k, paths=None, y0=2013, per_line=False):
     return rc.cell_table(layers, valid, k)
 
 
+def raw_block(d, aoi, k, path, y0):
+    """Replace the trait block with the 2D variables of a reflectance file
+    (columns T_raw_<var>_<y0>; pixels with n_clear == 0 are dropped)"""
+    ds = xr.open_dataset(path)
+    ok = ds.n_clear.values > 0 if 'n_clear' in ds else True
+    valid = rc.undisturbed(rc.open_env(aoi), 2019)
+    layers = {f'T_raw_{v}_{y0}': np.where(ok, ds[v].values, np.nan)
+              .astype(np.float32) for v in ds.data_vars
+              if v != 'n_clear' and ds[v].ndim == 2}
+    t = rc.cell_table(layers, valid, k)[['cell_row', 'cell_col'] +
+                                        list(layers)]
+    d = d.drop(columns=[c for c in d if c.startswith('T_')])
+    d = d.merge(t, on=['cell_row', 'cell_col'], how='left')
+    d[f'T_qcfc_{y0}'] = np.nan  # marks the trait year (trait_year)
+    return d
+
+
 def build(aoi, k, response_dir, dynamics_dir, paths=None, y0=2013,
           per_line=False):
     env = rc.open_env(aoi)
@@ -200,8 +239,10 @@ def structure_cells(d, aoi, k, source):
         L, on=['cell_row', 'cell_col'], how='inner')
 
 
-def lidar_check(d, source, targets, n_boot):
-    """Do traits add skill beyond lidar structure on the covered cells?"""
+def lidar_check(d, source, targets, n_boot, preds=None):
+    """Do traits add skill beyond lidar structure on the covered cells?
+
+    preds: optional list that collects each target's prediction frame"""
     L = STRUCTURES[source]
     _, T, W = feature_sets(d)
     es = ENV + S_WALL
@@ -220,9 +261,11 @@ def lidar_check(d, source, targets, n_boot):
             continue
         sub = d[d[t].notna() & np.isfinite(d[t])]
         w = 'mort_n' if t == 'mort_frac' else None
-        r, _ = rc.ladder(sub, t, fs, 'block1000', weight=w, n_boot=n_boot,
+        r, p = rc.ladder(sub, t, fs, 'block1000', weight=w, n_boot=n_boot,
                          pairs=pairs, extra_blocks=('block5000',))
         rows += r
+        if preds is not None:
+            preds.append(pred_frame(sub, t, p))
         g = {f'{x["features"]}-{x["compare"]}': x for x in r
              if x['compare'] and x['boot_blocks'] == 'block1000'}
         msg = '  '.join(
@@ -346,7 +389,9 @@ def feature_sets(d):
     y0 = trait_year(d)
     T = [f'T_{t}_{y0}' for t in TRAITS] + \
         [f'T_{t}_sd_{y0}' for t in SD_TRAITS] + [f'T_qcfc_{y0}']
-    T = [c for c in T if d[c].notna().any()]  # simulated files lack SD/QC
+    # simulated files lack SD/QC; --raw-block replaces the traits
+    T = [c for c in T if c in d and d[c].notna().any()] + \
+        [c for c in d if c.startswith('T_raw_')]
     T14 = [f'T_{t}_{y0 + 1}' for t in TRAITS] + [f'T_qcfc_{y0 + 1}']
     W = [c for c in (f'W_ewt_{y0}', f'W_ewt_{y0 + 1}') if c in d]
     es = ENV + S_WALL
@@ -421,14 +466,23 @@ def shap_summary(d, cols, target, max_n=20000):
 @click.option('--neighbour', is_flag=True,
               help='Run only the spatial-neighbourhood baseline ladder')
 @click.option('--neighbour-radius', default=2000, show_default=True)
+@click.option('--raw-block', 'raw_block_path',
+              type=click.Path(path_type=Path, exists=True),
+              help='Use the bands/indices of this reflectance file as T '
+                   '(one AOI)')
+@click.option('--save-preds', is_flag=True,
+              help='Write out-of-fold predictions (lidar check and main '
+                   'ladder) to preds_<run>.csv.gz')
 @click.option('--gains-only', is_flag=True,
               help='Ladder gains only: skip the conditional gains, residual '
                    'directions and SHAP')
 def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
          n_boot, structures, ablation, traits_path, cwc_path, trait_year,
-         line_z, neighbour, neighbour_radius, gains_only):
-    if (traits_path or cwc_path) and len(aois) > 1:
-        raise click.UsageError('--traits/--cwc take a single --aoi')
+         line_z, neighbour, neighbour_radius, raw_block_path, save_preds,
+         gains_only):
+    if (traits_path or cwc_path or raw_block_path) and len(aois) > 1:
+        raise click.UsageError('--traits/--cwc/--raw-block take a single '
+                               '--aoi')
     outputdir.mkdir(parents=True, exist_ok=True)
     rows, cond_rows, res_rows, imp_rows = [], [], [], []
     for aoi in aois:
@@ -437,6 +491,8 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
             paths = trait_paths(aoi, traits_path, cwc_path)
             d = build(aoi, k, response_dir, dynamics_dir, paths, trait_year,
                       line_z)
+            if raw_block_path:
+                d = raw_block(d, aoi, k, raw_block_path, trait_year)
             if neighbour:
                 r = neighbour_ladder(d, targets, n_boot, neighbour_radius,
                                      scale_m)
@@ -479,7 +535,11 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
                                f'{len(sub)} cells')
                     if len(sub) < 500:
                         continue
-                    r = lidar_check(sub, src, targets, n_boot)
+                    pf = [] if save_preds else None
+                    r = lidar_check(sub, src, targets, n_boot, pf)
+                    if save_preds:
+                        write_preds(pf, outputdir / f'preds_lidar_{src}_'
+                                    f'{aoi}_{scale_m}m.csv.gz')
                     for x in r:
                         x.update(aoi=aoi, scale_m=scale_m, check=src)
                     f = outputdir / f'lidar_check_{src}.csv'
@@ -497,6 +557,7 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
             fs['Env+S+Tres'] = ENV + S_WALL + list(R.columns)
             d.to_csv(outputdir / f'cells_{aoi}_{scale_m}m.csv', index=False)
             click.echo(f'[{aoi} {scale_m} m] {len(d)} cells')
+            pf = []
             for t in targets:
                 if t not in d or d[t].notna().sum() < 500:
                     continue
@@ -507,12 +568,16 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
                     ('Env+S+T', 'Env+S+T+T14'), ('Env+S', 'Env+S+W'),
                     ('Env+S+T', 'Env+S+T+W'), ('Env+S', 'Env+S+Tres'),
                     ('B1', 'Env+S')] if p[1] in fs]
-                r, _ = rc.ladder(sub, t, fs, 'block1000', weight=w,
+                r, p = rc.ladder(sub, t, fs, 'block1000', weight=w,
                                  n_boot=n_boot, pairs=pairs,
                                  extra_blocks=('block5000',))
                 for x in r:
                     x.update(aoi=aoi, scale_m=scale_m)
                 rows += r
+                if save_preds:
+                    pf.append(pred_frame(sub, t, p))
+                    write_preds(pf, outputdir / f'preds_ladder_{aoi}_'
+                                f'{scale_m}m.csv.gz')
                 gain = {f'{x["features"]}-{x["compare"]}': x for x in r
                         if x['compare'] and x['boot_blocks'] == 'block1000'}
                 base = [x for x in r if x['features'] == 'Env+S'

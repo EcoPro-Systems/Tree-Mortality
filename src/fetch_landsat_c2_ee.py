@@ -32,8 +32,17 @@ Output is <outputdir>/<aoi>_<variant>_doy<start>-<end>.nc with dims
 (year, y, x), matching hls_annual_composites.py: the six bands, ndvi, ndmi,
 nbr, nirv (= ndvi * nir) and n_clear.
 
+Single scenes (--scene YYYY-MM-DD, repeatable) instead write
+<outputdir>/<aoi>_l8_<YYYYMMDD>.nc with dims (y, x): the Landsat 8 scenes of
+that date over the AOI (one path), with the same masking and scaling, plus
+the coastal-aerosol band, and n_clear = 1 where a clear pixel was found.
+These are the single-date multispectral counterpart of an airborne scene
+(proto_spaceborne_sim.py).
+
     python fetch_landsat_c2_ee.py ../config/hls_aois.yml $E/landsat_composites \
         -a neon_soap_teak -w 182 273 -w 145 190
+    python fetch_landsat_c2_ee.py ../config/hls_aois.yml $E/wdts/sim \
+        -a sierra_nf --scene 2013-06-12
 """
 import time
 import click
@@ -49,6 +58,7 @@ from fetch_hls_aoi import aoi_grid
 ROLES = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2']
 INDICES = ['ndvi', 'ndmi', 'nbr', 'nirv']
 OUT_VARS = ROLES + INDICES + ['n_clear']
+SCENE_VARS = ['coastal'] + OUT_VARS
 SENSORS = {
     'LT05': ['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7'],
     'LE07': ['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7'],
@@ -113,7 +123,25 @@ def composite(sensors, year, doy, region):
     return med.select(ROLES + INDICES).addBands(n).toFloat()
 
 
-def fetch_rows(img, transform, crs, r0, nrows, ncols):
+def scene(date, region):
+    """Landsat 8 scenes of one date over the region, masked as in
+    prepare(), mosaicked, with the coastal-aerosol band"""
+    d = ee.Date(date)
+    col = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+           .filterBounds(region).filterDate(d, d.advance(1, 'day')))
+
+    def fn(img):
+        sr = prepare('LC08')(img)
+        coastal = (img.select('SR_B1').multiply(2.75e-5).add(-0.2)
+                   .rename('coastal').toFloat().resample('bilinear'))
+        return coastal.addBands(sr).updateMask(sr.select('nir').mask())
+    m = col.map(fn).mosaic()
+    clear = m.select('nir').mask().gt(0).rename('n_clear')
+    return m.select(SCENE_VARS[:-1]).addBands(clear).toFloat(), \
+        col.aggregate_array('system:index')
+
+
+def fetch_rows(img, transform, crs, r0, nrows, ncols, out_vars=OUT_VARS):
     req = {
         'expression': img,
         'fileFormat': 'NUMPY_NDARRAY',
@@ -136,7 +164,7 @@ def fetch_rows(img, transform, crs, r0, nrows, ncols):
             if not retry or attempt == 5:
                 raise
             time.sleep(2 ** attempt)
-    return {v: np.asarray(arr[v], dtype=np.float32) for v in OUT_VARS}
+    return {v: np.asarray(arr[v], dtype=np.float32) for v in out_vars}
 
 
 @click.command()
@@ -155,9 +183,12 @@ def fetch_rows(img, transform, crs, r0, nrows, ncols):
               show_default=True)
 @click.option('--project', default='ecopro-509818', show_default=True)
 @click.option('-j', '--jobs', default=6, show_default=True)
+@click.option('--scene', 'scenes', multiple=True,
+              help='Fetch the Landsat 8 scene(s) of this date (YYYY-MM-DD) '
+                   'instead of composites; repeatable')
 @click.option('--overwrite', is_flag=True)
 def main(configfile, outputdir, names, windows, variants, years, project,
-         jobs, overwrite):
+         jobs, scenes, overwrite):
     ee.Initialize(project=project,
                   opt_url='https://earthengine-highvolume.googleapis.com')
     config = load_config(configfile)
@@ -171,7 +202,12 @@ def main(configfile, outputdir, names, windows, variants, years, project,
         x0, y1 = transform.c, transform.f
         x1, y0 = x0 + shape[1] * transform.a, y1 + shape[0] * transform.e
         region = ee.Geometry.Rectangle([x0, y0, x1, y1], crs, False)
-        chunk = max(1, MAX_BYTES // (4 * len(OUT_VARS) * shape[1]))
+        chunk = max(1, MAX_BYTES // (4 * len(SCENE_VARS) * shape[1]))
+        for date in scenes:
+            fetch_scene(name, date, region, transform, shape, crs, chunk,
+                        outputdir, jobs, overwrite)
+        if scenes:
+            continue
         for variant in variants:
             for doy in windows:
                 outfile = (outputdir /
@@ -214,6 +250,41 @@ def main(configfile, outputdir, names, windows, variants, years, project,
                 ds.to_netcdf(outfile, encoding=enc)
                 click.echo(f'{outfile.name}: {len(jobs_)} requests in '
                            f'{time.time() - t0:.0f}s')
+
+
+def fetch_scene(name, date, region, transform, shape, crs, chunk, outputdir,
+                jobs, overwrite):
+    outfile = outputdir / f'{name}_l8_{date.replace("-", "")}.nc'
+    if outfile.exists() and not overwrite:
+        click.echo(f'{outfile.name} exists; skipping')
+        return
+    img, ids = scene(date, region)
+    ids = ids.getInfo()
+    if not ids:
+        click.echo(f'[{name}] no Landsat 8 scene on {date}')
+        return
+    out = {v: np.full(shape, np.nan, np.float32) for v in SCENE_VARS}
+    with ThreadPoolExecutor(jobs) as pool:
+        futs = {pool.submit(fetch_rows, img, transform, crs, r0,
+                            min(chunk, shape[0] - r0), shape[1],
+                            SCENE_VARS): r0
+                for r0 in range(0, shape[0], chunk)}
+        for f in as_completed(futs):
+            r0 = futs[f]
+            for v, a in f.result().items():
+                out[v][r0:r0 + len(a)] = a
+    out['n_clear'] = np.nan_to_num(out['n_clear']).astype(np.int16)
+    xs = transform.c + transform.a * (np.arange(shape[1]) + 0.5)
+    ys = transform.f + transform.e * (np.arange(shape[0]) + 0.5)
+    ds = xr.Dataset({v: (('y', 'x'), out[v]) for v in SCENE_VARS},
+                    coords={'y': ys, 'x': xs},
+                    attrs={'crs': crs, 'transform': list(transform)[:6],
+                           'date': date, 'scenes': ','.join(ids),
+                           'source': 'LANDSAT/LC08/C02/T1_L2'})
+    ds.to_netcdf(outfile, encoding={v: {'zlib': True}
+                                    for v in ds.data_vars})
+    click.echo(f'{outfile.name}: {",".join(ids)}; clear '
+               f'{out["n_clear"].mean():.1%} of the AOI')
 
 
 if __name__ == '__main__':

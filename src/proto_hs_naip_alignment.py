@@ -41,8 +41,9 @@ Outputs (outputdir):
 
 The HS data are in EPSG:32611 and the chips in EPSG:26911 (NAD83). With
 PROJ_NETWORK=ON pyproj applies a grid-based datum shift of about 0.8 m
-here; with it off (the default) the two are treated as identical. Set
-PROJ_NETWORK=OFF to reproduce the numbers in docs/hls_mortality_prototype.md.
+here; with it off the two are treated as identical. The script sets
+PROJ_NETWORK=OFF before pyproj loads, which reproduces the numbers in
+docs/hls_mortality_prototype.md.
 
 Runtime on a laptop: register ~6 min, height ~3 min, stacked ~5 min,
 rescore ~40 min. --max-chips limits each step to the first N chips per year
@@ -54,6 +55,7 @@ Usage:
       --step register --step height --step stacked
 """
 import os
+os.environ['PROJ_NETWORK'] = 'OFF'  # before pyproj loads; see above
 import glob
 import click
 import numpy as np

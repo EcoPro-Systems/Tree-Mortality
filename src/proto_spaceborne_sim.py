@@ -17,6 +17,17 @@ Steps (subcommands):
             write wdts/sim/<aoi>_{traits,cwc}_<config>.nc in the layout of
             fetch_wdts_traits.py / fetch_wdts_cwc.py, so that
             proto_response_traits.py --traits/--cwc runs unchanged.
+            --seed changes the noise draw (outputs <config>_s<seed>).
+  compare   Paired block-bootstrap of the difference in trait gain between
+            configurations (e.g. emit minus oli), from the out-of-fold
+            predictions that proto_response_traits.py --save-preds writes
+            for each configuration. All configurations share the cells and
+            the base-model predictions, so the difference in gain over the
+            base is the difference in R² of the two trait models, scored on
+            the same resampled blocks. The l8raw runs (no emulator: the
+            Landsat bands and indices themselves as the trait block,
+            proto_response_traits.py --raw-block) join the comparison the
+            same way.
 
 Configurations:
   native  AVIRIS-C bands (water-vapour bands dropped), 30 m, no added noise
@@ -28,6 +39,10 @@ Configurations:
   sbg_lo  10 nm bands, 30 m, half the EMIT noise level
   oli     Landsat 8 OLI reflective bands (boxcar approximations of the
           band passes), 30 m (the multispectral control; no EWT)
+  l8      a real Landsat 8 Collection 2 surface-reflectance scene near the
+          airborne date (--l8; fetch_landsat_c2_ee.py --scene), through the
+          same emulator: the oli control with Landsat's own calibration,
+          atmospheric correction, view geometry and registration (no EWT)
 60 m data are 2 x 2 means of the 30 m grid, retrieved at 60 m and put back
 on the 30 m grid (each 60 m value on its four 30 m pixels).
 
@@ -51,7 +66,9 @@ native configuration, not the full-T runs.
         --emit-uncert $E/emit/EMIT_L2A_RFLUNCERT_..._006.nc
     python proto_response_traits.py $E/hls_results/spaceborne_sim/emit \
         -a neon_soap_teak --traits $E/wdts/sim/neon_soap_teak_traits_emit.nc \
-        --cwc $E/wdts/sim/neon_soap_teak_cwc_emit.nc
+        --cwc $E/wdts/sim/neon_soap_teak_cwc_emit.nc \
+        --structure aso --structure lvis2008 --save-preds
+    python proto_spaceborne_sim.py compare -a neon_soap_teak
 """
 import os
 import time
@@ -75,6 +92,7 @@ BAD = [(0, 400), (1340, 1450), (1790, 1960), (2450, 3000)]
 OLI = [(435, 451), (452, 512), (533, 590), (636, 673), (851, 879),
        (1566, 1651), (2107, 2294)]
 CONFIGS = ['native', 'emit', 'sbg_hi', 'sbg_lo', 'oli']
+L8_BANDS = ['coastal', 'blue', 'green', 'red', 'nir', 'swir1', 'swir2']
 N_COMP = 25
 MAX_TRAIN = 60_000
 KW = rc.E / 'wdts' / 'aux' / 'prospect_d_spectra.txt'
@@ -294,6 +312,15 @@ def degrade(R, W, noise, agg, seed=0):
     return out
 
 
+def landsat_scene(path, shape):
+    """(7, H, W) clear-sky Landsat 8 reflectance and band centres"""
+    ds = xr.open_dataset(path)
+    assert ds.n_clear.shape == shape, 'Landsat scene is not on the AOI grid'
+    ok = ds.n_clear.values > 0
+    D = np.stack([np.where(ok, ds[b].values, np.nan) for b in L8_BANDS])
+    return D.astype(np.float32), np.array([np.mean(b) for b in OLI])
+
+
 def emulate(X, Y, blocks, n_comp, seed=0):
     """Out-of-fold PLSR predictions of each column of Y from X"""
     P = np.full(Y.shape, np.nan, np.float32)
@@ -317,9 +344,13 @@ def emulate(X, Y, blocks, n_comp, seed=0):
               required=True, help='EMIT_L2A_RFLUNCERT file (with its RFL '
                                   'file beside it)')
 @click.option('--config', 'configs', multiple=True, default=CONFIGS,
-              show_default=True, type=click.Choice(CONFIGS))
+              show_default=True, type=click.Choice(CONFIGS + ['l8']))
+@click.option('--l8', 'l8_path', type=click.Path(path_type=Path, exists=True),
+              help='Landsat 8 scene for the l8 configuration')
 @click.option('--n-comp', default=N_COMP, show_default=True)
-def simulate(name, emit_uncert, configs, n_comp):
+@click.option('--seed', default=0, show_default=True,
+              help='Noise draw; outputs are named <config>_s<seed> if not 0')
+def simulate(name, emit_uncert, configs, l8_path, n_comp, seed):
     """Degraded spectra -> emulated traits and EWT per configuration"""
     transform, shape, epsg = rc.aoi_info(name)
     ds = xr.open_dataset(SIM / f'{name}_refl{YEAR}.nc')
@@ -338,8 +369,14 @@ def simulate(name, emit_uncert, configs, n_comp):
     stats = []
     for cfg in configs:
         t0 = time.time()
-        W, owl, noise, agg = configure(cfg, wl, good, emit)
-        D = degrade(R, W, noise, agg)
+        if cfg == 'l8':
+            if l8_path is None:
+                raise click.UsageError('the l8 configuration needs --l8')
+            D, owl = landsat_scene(l8_path, shape)
+        else:
+            W, owl, noise, agg = configure(cfg, wl, good, emit)
+            D = degrade(R, W, noise, agg, seed)
+        label = cfg if seed == 0 else f'{cfg}_s{seed}'
         # log reflectance: closer to the 2403 maps than raw or vector-
         # normalized spectra (out-of-fold R², native configuration)
         X = np.log(np.clip(D.reshape(len(owl), -1).T, 1e-3, None))
@@ -351,28 +388,29 @@ def simulate(name, emit_uncert, configs, n_comp):
         Yf = Y.reshape(-1, len(TRAITS))
         for j, t in enumerate(TRAITS):
             ok = pix & np.isfinite(Yf[:, j])
-            stats.append(dict(aoi=name, config=cfg, trait=t, n=int(ok.sum()),
+            stats.append(dict(aoi=name, config=label, trait=t,
+                              n=int(ok.sum()),
                               r2=rc.wr2(Yf[ok, j], P[ok, j]),
                               rho=pd.Series(Yf[ok, j]).corr(
                                   pd.Series(P[ok, j]), method='spearman')))
-        # EWT (not for OLI: no bands in the 980 nm window)
+        # EWT (not for Landsat bands: none in the 980 nm window)
         ewt = np.full(shape, np.nan, np.float32)
-        if cfg != 'oli':
+        if cfg not in ('oli', 'l8'):
             with np.errstate(invalid='ignore', divide='ignore'):
                 ewt = fit_ewt(D, owl, kw_wl, kw, WIN_980).astype(np.float32)
-        write_outputs(name, cfg, P.reshape(shape + (len(TRAITS),)), ewt,
+        write_outputs(name, label, P.reshape(shape + (len(TRAITS),)), ewt,
                       fid, transform, shape, epsg)
-        s = {x['trait']: x for x in stats if x['config'] == cfg}
-        click.echo(f'[{name}] {cfg:7s} {len(owl):3d} bands  ' + '  '.join(
+        s = {x['trait']: x for x in stats if x['config'] == label}
+        click.echo(f'[{name}] {label:7s} {len(owl):3d} bands  ' + '  '.join(
             f'{t} R² {s[t]["r2"]:.2f}' for t in
             ('Nitrogen', 'LMA', 'Lignin', 'Cellulose', 'Chlorophylls')) +
             f'  median EWT {np.nanmedian(ewt):.3f}  ({time.time() - t0:.0f} s)')
         f = SIM / f'{name}_emulator.csv'
         old = pd.read_csv(f) if f.exists() else pd.DataFrame()
         if len(old):
-            old = old[~old.config.isin([cfg])]
+            old = old[~old.config.isin([label])]
         pd.concat([old, pd.DataFrame([x for x in stats
-                                      if x['config'] == cfg])]).to_csv(
+                                      if x['config'] == label])]).to_csv(
             f, index=False)
 
 
@@ -396,6 +434,106 @@ def write_outputs(name, cfg, P, ewt, fid, transform, shape, epsg):
                 'source_line': (dims, fid[None].astype(np.int16))},
                coords=coords, attrs=attrs).to_netcdf(
         SIM / f'{name}_cwc_{cfg}.nc')
+
+
+# ------------------------------------------------------------- compare
+
+KEYS = ['cell_row', 'cell_col']
+BLOCKS = ['block1000', 'block5000']
+# (base, trait model) per kind of run: the gain of each trait model over
+# its base, and the paired difference of that model between configurations
+COMPARE = {'lidar': [('Env+S+L', 'Env+S+L+Tres'), ('Env+S+L', 'Env+S+L+T'),
+                     ('Env+S', 'Env+S+T')],
+           'ladder': [('Env+S', 'Env+S+T'), ('Env+S', 'Env+S+Tres')]}
+
+
+def joined_preds(root, configs, run, name, target, scale_m=90):
+    """The configurations' predictions for one target on the cells all of
+    them share, as columns <config>:<feature set>"""
+    m = None
+    for c in configs:
+        f = root / c / f'preds_{run}_{name}_{scale_m}m.csv.gz'
+        if not f.exists():
+            continue
+        p = pd.read_csv(f)
+        p = p[p.target == target].drop(columns='target')
+        p = p.rename(columns={x: f'{c}:{x}' for x in p.columns
+                              if x not in KEYS + BLOCKS + ['y']})
+        m = p if m is None else m.merge(p.drop(columns=BLOCKS + ['y']),
+                                        on=KEYS, how='inner')
+    return m
+
+
+@cli.command()
+@click.option('-a', '--aoi', 'name', default='neon_soap_teak',
+              show_default=True)
+@click.option('--root', type=click.Path(path_type=Path),
+              default=rc.E / 'hls_results' / 'spaceborne_sim',
+              show_default=True)
+@click.option('--config', 'configs', multiple=True,
+              default=CONFIGS + ['l8', 'l8raw'], show_default=True)
+@click.option('--ref', 'refs', multiple=True, default=['oli', 'l8', 'l8raw'],
+              show_default=True, help='Configurations to difference against')
+@click.option('-t', '--target', 'targets', multiple=True,
+              default=['ndmi_recovery', 'nirv_recovery', 'ndmi_sens',
+                       'ndmi_resistance'], show_default=True)
+@click.option('--n-boot', default=1000, show_default=True)
+def compare(name, root, configs, refs, targets, n_boot):
+    """Paired differences in trait gain between configurations"""
+    rows = []
+    for run in ('lidar_aso', 'lidar_lvis2008', 'ladder'):
+        kind = run.split('_')[0]
+        for t in targets:
+            m = joined_preds(root, configs, run, name, t)
+            if m is None or len(m) < 500:
+                continue
+            have = [c for c in configs if f'{c}:{COMPARE[kind][0][1]}' in m]
+            if len(have) < 2:
+                continue
+            # base models use no traits, so they must agree across configs
+            for base in {b for b, _ in COMPARE[kind]}:
+                b = m[[f'{c}:{base}' for c in have]].values
+                dev = np.abs(b - b[:, :1]).max()
+                if dev > 1e-5:
+                    click.echo(f'  warning: {run} {t} {base} predictions '
+                               f'differ between configurations ({dev:.2g})')
+            preds = {x: m[x].values for x in m.columns if ':' in x}
+            pairs, meta = [], []
+            for base, full in COMPARE[kind]:
+                for c in have:
+                    pairs.append((f'{have[0]}:{base}', f'{c}:{full}'))
+                    meta.append((c, full, 'gain', base))
+                    for r in refs:
+                        if r in have and r != c:
+                            pairs.append((f'{r}:{full}', f'{c}:{full}'))
+                            meta.append((c, full, 'diff', r))
+            for bcol in BLOCKS:
+                bs = rc.bootstrap_r2(m.y.values, preds, m[bcol].values,
+                                     n_boot=n_boot, pairs=pairs)
+                for (a, b), (c, full, kd, cmp) in zip(pairs, meta):
+                    est, lo, hi = bs[f'{b}-{a}']
+                    rows.append(dict(aoi=name, run=run, target=t,
+                                     boot_blocks=bcol, n=len(m), config=c,
+                                     features=full, kind=kd, compare=cmp,
+                                     r2=est, lo=lo, hi=hi))
+            base, full = COMPARE[kind][0]
+            g = {(x['config'], x['kind'], x['compare']): x for x in rows
+                 if x['run'] == run and x['target'] == t
+                 and x['features'] == full and x['boot_blocks'] == BLOCKS[0]}
+            click.echo(f'[{name}] {run} {t} n={len(m)}: {full} over {base}')
+            for c in have:
+                x = g[(c, 'gain', base)]
+                msg = f'    {c:7s} {x["r2"]:+.3f} [{x["lo"]:+.3f},' \
+                      f'{x["hi"]:+.3f}]'
+                for r in refs:
+                    x = g.get((c, 'diff', r))
+                    if x:
+                        msg += (f'   vs {r} {x["r2"]:+.3f} '
+                                f'[{x["lo"]:+.3f},{x["hi"]:+.3f}]')
+                click.echo(msg)
+    out = root / f'paired_{name}.csv'
+    pd.DataFrame(rows).to_csv(out, index=False)
+    click.echo(f'wrote {out}')
 
 
 if __name__ == '__main__':

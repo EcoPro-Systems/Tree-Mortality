@@ -34,6 +34,20 @@ proto_response_traits.py:
                forcing (cwd_anom_1416), in subsets whose SD ratio
                approaches the Tahoe one.
 
+  groups       --group: directions within further groups of cells
+               (baseline variant; subset <group>_<value> in directions.csv,
+               group sizes in groups.csv; use a separate OUTPUTDIR):
+                 agent     dominant mortality agent mapped by the USFS
+                           Aerial Detection Survey in 2014-17 (fir
+                           engraver / pine beetles / none or mixed)
+                 host      dominant host of that mapped mortality (white
+                           fir / California red fir / pine)
+                 cwd_late  terciles of 2016's share of the cell's
+                           2012-16 CWD anomaly (the Tahoe box's driest
+                           year is 2016, the Yosemite box's 2014)
+                 ewt_min   the year of the cell's minimum June EWT,
+                           2014-16 (Tahoe box 2015, Yosemite box 2016)
+
 Residual traits are cross-fitted on Env+S over all cells (as in
 proto_response_traits.py), and ρ is averaged within aridity-tercile x
 200 m elevation strata. The 95% CIs come from a 1 km block bootstrap, with
@@ -67,6 +81,16 @@ FOCUS = ['Nitrogen', 'LMA', 'Lignin', 'Cellulose']
 YOSEMITE = ('neon_soap_teak', 'sierra_nf')
 VARIANTS = ['baseline', 'nov2', 'year2014', 'year2015', 'line_z']
 MIN_GROUP = 1000  # cells for a forest-type subset
+GROUPS = ['agent', 'host', 'cwd_late', 'ewt_min']
+ADS_YEARS = (2014, 2015, 2016, 2017)
+MIN_MAPPED = 0.25  # share of a cell's pixels with mapped mortality
+AGENTS = {'fir engraver': 'fir_engraver', 'mountain pine beetle':
+          'pine_beetles', 'western pine beetle': 'pine_beetles',
+          'Jeffrey pine beetle': 'pine_beetles'}
+HOSTS = {'white fir': 'white_fir', 'California red fir': 'red_fir',
+         'ponderosa pine': 'pine', 'Jeffrey pine': 'pine',
+         'sugar pine': 'pine', 'lodgepole pine': 'pine',
+         'western white pine': 'pine'}
 N_NOISE = 20
 FORCING_Q = (1 / 3, 1 / 2, 2 / 3)
 
@@ -96,6 +120,62 @@ def forest_type(aoi, k):
     t['ftype'] = np.where(t[F].values.max(1) >= 0.5,
                           np.array(FTYPES)[top], 'mixed')
     return t[['cell_row', 'cell_col', 'ftype'] + F]
+
+
+def ads_classes(aoi, field, classes):
+    """Per pixel and class: mapped in any ADS mortality polygon of that
+    class in 2014-17 (the most severe polygon covering the pixel)"""
+    lab = xr.open_dataset(rc.E / 'hls_labels' / f'{aoi}.nc')
+    polys = pd.read_csv(rc.E / 'hls_labels' / f'{aoi}_polygons.csv',
+                        usecols=['poly_id', field], low_memory=False)
+    cls = polys.set_index('poly_id')[field].map(classes)
+    names = sorted(set(classes.values()))
+    out = {n: np.zeros(lab.label.shape[1:], bool) for n in names}
+    for y in ADS_YEARS:
+        pid = lab.poly_id.sel(year=y).values
+        for n in names:
+            ids = cls.index[cls == n].values
+            out[n] |= np.isin(pid, ids)
+    return out
+
+
+def dominant(t, names, label):
+    """Dominant class of the cells' mapped-mortality fractions"""
+    F = t[[f'{label}_{n}' for n in names]].values
+    top = F.argmax(1)
+    return np.where(F.max(1) >= MIN_MAPPED, np.array(names)[top],
+                    np.where(F.sum(1) < 0.05, 'none', 'low_or_mixed'))
+
+
+def group_table(aoi, k):
+    """Per cell: ADS agent and host groups, drought timing groups"""
+    env = rc.open_env(aoi)
+    valid = rc.undisturbed(env, 2019)
+    layers = {}
+    for field, classes, label in (('DCA_COMMON_NAME', AGENTS, 'agent'),
+                                  ('HOST', HOSTS, 'host')):
+        for n, a in ads_classes(aoi, field, classes).items():
+            layers[f'{label}_{n}'] = a.astype(np.float32)
+    anom = {y: (env.cwd.sel(year=y) - env.cwd_clim).values
+            for y in range(2012, 2017)}
+    for y, a in anom.items():
+        layers[f'cwd_anom_{y}'] = a.astype(np.float32)
+    cwc = rc.E / 'wdts' / f'{aoi}_cwc.nc'
+    ew = xr.open_dataset(cwc)
+    for y in (2014, 2015, 2016):
+        layers[f'ewt_{y}'] = ew.ewt980.sel(year=y).values.astype(np.float32)
+    t = rc.cell_table(layers, valid, k)
+    for label, classes in (('agent', AGENTS), ('host', HOSTS)):
+        t[label] = dominant(t, sorted(set(classes.values())), label)
+    A = t[[f'cwd_anom_{y}' for y in range(2012, 2017)]]
+    late = t.cwd_anom_2016 / A.clip(lower=0).sum(1)
+    t['cwd_late'] = pd.qcut(late, 3, labels=['early', 'mid', 'late']
+                            ).astype(str)
+    E3 = t[[f'ewt_{y}' for y in (2014, 2015, 2016)]]
+    t['ewt_min'] = np.where(E3.notna().all(1),
+                            (E3.fillna(np.inf).values.argmin(1) + 2014)
+                            .astype(str), 'na')
+    return t[['cell_row', 'cell_col'] + GROUPS]
 
 
 def residual_traits(d):
@@ -268,11 +348,14 @@ def save(rows, path):
 @click.option('--scale', default=3, show_default=True)
 @click.option('--n-boot', default=500, show_default=True)
 @click.option('--skip-ladder', is_flag=True)
+@click.option('--group', 'groups', multiple=True, type=click.Choice(GROUPS),
+              help='Directions within ADS agent/host or drought-timing '
+                   'groups (baseline variant)')
 def main(outputdir, aois, variants, response_dirs, dynamics_dir, scale,
-         n_boot, skip_ladder):
+         n_boot, skip_ladder, groups):
     outputdir.mkdir(parents=True, exist_ok=True)
     scale_m = rc.RES * scale
-    rows, lad, sig = [], [], []
+    rows, lad, sig, grows = [], [], [], []
     ratios = {}
     for aoi in aois:
         rdir = next(rc.E / 'hls_results' / r for r in response_dirs
@@ -304,6 +387,20 @@ def main(outputdir, aois, variants, response_dirs, dynamics_dir, scale,
                         rows += directions(
                             s, [f'R_{t}' for t in FOCUS], TARGETS[:2],
                             n_boot, **tags, subset=f'ftype_{g}')
+            if v == 'baseline' and groups:
+                gt = group_table(aoi, scale)
+                dg = dd.merge(gt, on=['cell_row', 'cell_col'], how='left')
+                for g in groups:
+                    for val, s in dg.groupby(g):
+                        if len(s) >= MIN_GROUP:
+                            grows.append(dict(aoi=aoi, group=g, value=val,
+                                              n=len(s)))
+                            rows += directions(
+                                s, [f'R_{t}' for t in FOCUS], TARGETS[:2],
+                                n_boot, **tags, subset=f'{g}_{val}')
+                    click.echo(f'  {g}: ' + ', '.join(
+                        f'{k} {n}' for k, n in dg[g].value_counts().items()))
+                save(grows, outputdir / 'groups.csv')
             if v == 'baseline' and ft is not None and not skip_ladder:
                 lad += ftype_ladder(d, n_boot, aoi, scale_m)
                 save(lad, outputdir / 'ladder_ftype.csv')

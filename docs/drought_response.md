@@ -652,6 +652,9 @@ signal. What differs between the boxes remains open. Candidates:
 - the mortality agents (fir engraver in the Tahoe box);
 - the drought's timing in the northern Sierra.
 
+§22 tests all three with ADS agent and host maps and per-cell timing; none
+explains it.
+
 ### 10. Held-out sites for the 2020–22 drought
 
 **Held-out sites.**
@@ -706,7 +709,7 @@ to cycle 2 with T18 swapped in (per-date z-scores).
 - At NEON, traits raise the rank skill for recovery: NDMI ρ 0.20 → 0.33;
   NIRv ρ 0.41 → 0.52. The 2013 traits in the same slot give 0.24 and 0.46.
 - At `sierra_nf` the environment-only transfer already ranks cells in
-  reverse (ρ −0.49 to −0.01, NDMI recovery ρ ≈ 0). Traits do not rescue it: NDMI
+  reverse (ρ −0.49 to −0.01, NDMI recovery ρ ≈ 0; why: §21). Traits do not rescue it: NDMI
   recovery ρ 0.10.
 - The resilience ranking reverses at both AOIs with or without traits.
 - Per-date percentile ranks instead of z-scores (`--rank`) give the same
@@ -1010,7 +1013,8 @@ All entries have 95% CIs above 0 except Landsat-band resistance over ASO.
     uncertain;
   - the noise model is per-band and spatially independent;
   - the OLI proxies come from the same AVIRIS scene, so they carry none of
-    Landsat's real calibration or atmospheric differences.
+    Landsat's real calibration or atmospheric differences. §20 replaces
+    them with a real Landsat 8 scene and a paired test.
 
 ### 19. Scale sensitivity: 30, 90 and 270 m (`hls_results/scale_sensitivity/`)
 
@@ -1055,6 +1059,267 @@ All entries have 95% CIs above 0 except Landsat-band resistance over ASO.
   30 and 90 m. At 270 m, with only 2,300–5,200 cells, resistance loses them
   everywhere and stress response at NEON. `sierra_nf` keeps +0.012 [0.003,
   0.021].
+
+### 20. Do full spectra add to multispectral bands? A paired test with real Landsat (`hls_results/spaceborne_paired/`)
+
+§18 left open whether full-spectrum (VSWIR) inputs beat Landsat bands. Its
+separate CIs overlapped, and its Landsat-band control came from the AVIRIS
+scene itself. This section closes both gaps.
+- **Paired test:**
+  - `proto_response_traits.py --save-preds` writes each configuration's
+    out-of-fold predictions;
+  - `proto_spaceborne_sim.py compare` joins them on the cells and
+    bootstraps the *difference* in gain on the same resampled blocks;
+  - the base models use no traits and agree across configurations
+    (to 1e-5), so the difference in gain is the difference in R² of
+    the trait models.
+- **Second area:** `sierra_nf` (2013-06-12 `_v2` lines), over ASO (48,731
+  cells), alongside NEON over ASO and LVIS.
+- **Real Landsat:**
+  - Landsat 8 Collection 2 surface reflectance, LC08 042034 of 2013-06-21,
+    nine days after the AVIRIS flight (`fetch_landsat_c2_ee.py --scene`);
+  - clear over 98% of both AOIs;
+  - the 2013-06-05 scene is 66% clear at NEON;
+  - the same-day 2013-06-12 path-43 scene covers 4% of `sierra_nf`.
+- **Two new configurations:**
+  - **l8:** the seven OLI bands through the same out-of-fold emulator to
+    the 2403 maps;
+  - **l8raw:** the bands, NDVI, NDMI, NBR and NIRv themselves as the trait
+    block (`--raw-block`), with no airborne training at all.
+- Runs restricted to NDMI and NIRv recovery and stress response reproduce
+  the §18 gains exactly.
+
+**Emulator out-of-fold R² against the 2403 maps, `sierra_nf` (NEON in
+§18):**
+
+| Trait | native | emit | sbg_hi | sbg_lo | oli | l8 (NEON l8) |
+|---|---|---|---|---|---|---|
+| Nitrogen | 0.79 | 0.57 | 0.67 | 0.70 | 0.51 | 0.46 (0.51) |
+| LMA | 0.92 | 0.79 | 0.87 | 0.90 | 0.65 | 0.59 (0.72) |
+| Lignin | 0.82 | 0.56 | 0.65 | 0.73 | 0.48 | 0.38 (0.36) |
+| Cellulose | 0.75 | 0.44 | 0.52 | 0.59 | 0.25 | 0.31 (0.38) |
+
+Real Landsat reproduces the airborne trait maps a little less well than the
+simulated OLI bands do.
+
+**NDMI recovery gains** (Tres over Env+S+L; T over Env+S):
+
+| Configuration | NEON, ASO | NEON, LVIS | `sierra_nf`, ASO | NEON, over Env+S | `sierra_nf`, over Env+S |
+|---|---|---|---|---|---|
+| native | +0.039 | +0.049 | +0.023 | +0.063 | +0.086 |
+| emit | +0.033 | +0.042 | +0.017 | +0.051 | +0.068 |
+| sbg_hi | +0.037 | +0.047 | +0.019 | +0.052 | +0.070 |
+| sbg_lo | +0.038 | +0.050 | +0.021 | +0.060 | +0.080 |
+| oli (simulated) | +0.025 | +0.039 | +0.013 | +0.044 | +0.063 |
+| **l8** (real Landsat, emulated) | +0.035 | +0.046 | **+0.027** | +0.054 | +0.083 |
+| **l8raw** (real Landsat, no emulator) | +0.029 | +0.041 | +0.023 | +0.046 | +0.060 |
+
+**Paired differences, NDMI recovery** (95% CI over 1 km blocks):
+
+| Difference | NEON, ASO | NEON, LVIS | `sierra_nf`, ASO | NEON, over Env+S | `sierra_nf`, over Env+S |
+|---|---|---|---|---|---|
+| native − oli | **+0.014** [0.008, 0.020] | **+0.010** [0.002, 0.019] | **+0.010** [0.007, 0.014] | **+0.019** [0.014, 0.024] | **+0.023** [0.019, 0.027] |
+| emit − oli | **+0.009** [0.003, 0.015] | +0.003 [−0.003, 0.010] | **+0.004** [0.001, 0.007] | **+0.007** [0.003, 0.011] | **+0.005** [0.000, 0.009] |
+| sbg_lo − oli | **+0.014** [0.008, 0.020] | **+0.012** [0.005, 0.020] | **+0.008** [0.005, 0.011] | **+0.016** [0.011, 0.021] | **+0.017** [0.013, 0.021] |
+| native − l8 | +0.004 [−0.004, 0.011] | +0.002 [−0.006, 0.010] | −0.004 [−0.007, 0.000] | **+0.009** [0.003, 0.016] | +0.003 [−0.002, 0.008] |
+| emit − l8 | −0.002 [−0.008, 0.004] | −0.005 [−0.012, 0.003] | **−0.010** [−0.013, −0.007] | −0.003 [−0.008, 0.003] | **−0.015** [−0.021, −0.010] |
+| sbg_lo − l8 | +0.003 [−0.004, 0.010] | +0.004 [−0.005, 0.013] | **−0.006** [−0.010, −0.002] | +0.006 [−0.000, 0.013] | −0.003 [−0.008, 0.002] |
+| native − l8raw | **+0.010** [0.003, 0.018] | +0.008 [−0.001, 0.017] | +0.000 [−0.004, 0.004] | **+0.018** [0.011, 0.025] | **+0.026** [0.020, 0.033] |
+
+- **5 km blocks** widen the intervals slightly. native − l8 over Env+S at
+  NEON becomes [−0.000, 0.019].
+- **NIRv recovery:** the VSWIR configurations do no better than simulated
+  OLI at NEON. At `sierra_nf` they beat it by +0.007 to +0.010, but l8 beats
+  every VSWIR configuration by +0.009 to +0.011.
+- **Stress response:** every VSWIR configuration does *worse* than real
+  Landsat (−0.009 to −0.018 vs l8; −0.015 to −0.025 vs l8raw, at both
+  areas).
+
+**Reading.**
+- **Against simulated OLI, full spectra win** for NDMI recovery, at both
+  areas and over every lidar source: +0.010 to +0.014 for native AVIRIS,
+  +0.008 to +0.014 for the 30 m 10 nm configuration. The EMIT-like
+  configuration wins narrowly (+0.003 to +0.009, one CI touching 0).
+- **Against a real Landsat 8 scene, they do not.**
+  - Emulated from real Landsat, the trait block gives NDMI-recovery gains
+    over lidar equal to native AVIRIS at NEON, and slightly larger at
+    `sierra_nf` (CI touching 0).
+  - Every spaceborne-like VSWIR configuration is equal to or below it.
+- The real Landsat bands beat the simulated ones by +0.008 to +0.020.
+  Simulated OLI is therefore not a fair multispectral control: real Landsat
+  carries information the AVIRIS-convolved bands do not.
+  - A second date: June 21 rather than June 12.
+  - Landsat's own geometry and registration, shared with the Landsat-based
+    response metrics.
+  - A view geometry free of AVIRIS cross-track effects.
+- **What full spectra still add.** Without lidar, native AVIRIS traits beat
+  the raw Landsat block by +0.018 (NEON) and +0.026 (`sierra_nf`), and
+  emulated Landsat at NEON by +0.009. The advantage is in the retrievals at
+  airborne quality, against Landsat with no airborne training. It does not
+  survive spaceborne-like noise and sampling, or comparison with
+  airborne-trained Landsat proxies.
+- **Recovery-relevant trait information is largely multispectral** once
+  lidar structure is in the model. Airborne trait maps make it usable by
+  training Landsat proxies: l8 beats l8raw by +0.004 to +0.007 for NDMI
+  recovery over lidar, and by +0.009 to +0.023 over Env+S.
+- **Caveats:**
+  - one June date per area;
+  - emulated rather than published retrievals;
+  - the Landsat responses share sensor and registration with the l8 inputs,
+    which may favour them;
+  - the 2013 scene falls inside the 2012–16 drought, so it also carries
+    early stress (relevant to the stress-response result).
+
+### 21. Why does the cross-drought transfer rank `sierra_nf` cells in reverse? (`hls_results/transfer_diagnostics/`)
+
+`proto_transfer_diagnostics.py` refits the §11 transfers (cycle-1 model,
+Env+S or Env+S+T13, applied to cycle 2 with T18 swapped in) on the same
+cells. It then asks where the rank skill is lost. It reproduces §11:
+`sierra_nf` NDMI recovery ρ −0.01 (Env+S) and +0.10 (with traits); NEON
++0.20 and +0.33.
+
+**Covariates per 90 m cell:**
+- distance to the nearest 2020–21 fire perimeter (FRAP; mostly the Creek
+  Fire);
+- distance to the nearest FACTS harvest unit completed in 2016–25;
+- the share of the cell mapped in an ADS mortality polygon in 2015–17;
+- the cell's cycle-1 response;
+- the change in drought forcing;
+- elevation;
+- climatic CWD.
+
+ρ CIs come from a 1 km block bootstrap.
+
+**Not the fire edge, and not treatments.**
+- 28% of the `sierra_nf` cells lie within 2 km of a 2020–21 fire.
+- Dropping them makes the transfer *worse*: NDMI recovery ρ −0.04 at
+  ≥ 2 km and −0.10 [−0.21, 0.01] at ≥ 5 km. NIRv recovery goes from −0.23
+  to −0.29 and −0.37.
+- Cells nearest the fire rank best (0–2 km: +0.09).
+- Recent treatments are within 1 km of only 2% of the cells, and dropping
+  them changes nothing.
+
+**Not cycle-1 damage as ADS maps it.**
+- 97% of the `sierra_nf` cells have some pixel inside a 2015–17 mortality
+  polygon, so the ADS extent says little there.
+- Across its quartiles the transfer ρ shows no trend (+0.04 to +0.24).
+
+**The elevation gradient of the response flips between the droughts.**
+Spearman ρ of elevation with each response, in cycle 1 and cycle 2, on the
+same cells:
+
+| Response | `sierra_nf` cycle 1 → 2 | NEON cycle 1 → 2 |
+|---|---|---|
+| NDMI resistance | +0.40 → **−0.59** | +0.73 → +0.23 |
+| NDMI recovery | +0.35 → **−0.44** | −0.20 → −0.69 |
+| NIRv recovery | +0.09 → **−0.40** | −0.40 → −0.70 |
+| NDMI resilience | +0.50 → **−0.62** | +0.50 → **−0.37** |
+
+- At `sierra_nf`, low-elevation cells responded worse in 2012–16 and
+  better in 2020–22, for every response.
+- Climatic temperature flips with it (recovery −0.35 → +0.42), and the
+  canopy height and cover associations lose or flip their sign.
+- The local drought forcing does not flip: ρ of the drought CWD anomaly
+  with recovery is +0.23 in cycle 1 and +0.20 in cycle 2.
+- At NEON only resilience flips, which is the resilience reversal that §4
+  and §11 report at both AOIs.
+
+**Within elevation quartiles the transfer ranks cells correctly.**
+
+| `sierra_nf`, within elevation quartile | q1 | q2 | q3 | q4 |
+|---|---|---|---|---|
+| NDMI recovery, Env+S | +0.24 | +0.23 | +0.20 | +0.29 |
+| NDMI recovery, Env+S+T | +0.20 | +0.21 | +0.36 | +0.50 |
+| NDMI resistance, Env+S | −0.05 | −0.09 | −0.03 | +0.04 |
+| NIRv recovery, Env+S | −0.06 | −0.14 | −0.03 | −0.09 |
+
+All CIs on the NDMI-recovery entries exclude 0. Compare the pooled values:
+NDMI recovery −0.01, resistance −0.38, NIRv recovery −0.23.
+- With traits, the within-band ranking improves most at high elevation
+  (+0.36 and +0.50 in the top two quartiles).
+- Dropping the quarter of cells with the weakest cycle-1 recovery also
+  helps: NDMI recovery +0.06 (Env+S) and +0.22 (with traits).
+
+**Reading.**
+- The reverse ranking at `sierra_nf` is a between-elevation effect. The
+  first drought hit the lower slopes hardest and the second hit the upper
+  slopes hardest, so a model that learned the first gradient ranks the
+  second backwards.
+- Within elevation bands the cycle-1 model, and its traits, still rank
+  cycle-2 cells in the right order.
+- Why the gradient flipped is not settled here. Candidates are the upslope
+  shift of the 2020–22 drought's impact, the first drought's losses
+  lowering the low-elevation baseline, and snow years in the post window
+  (2023).
+- **For any forward test:** report rank skill within elevation (or
+  climate) strata as well as pooled, or include an explicit term for how
+  the response's elevation gradient changes between droughts.
+
+### 22. Do mortality agent, host or drought timing explain the Tahoe-box directions? (`hls_results/trait_directions_groups/`)
+
+§9 ruled out calibration, LANDFIRE forest type and signal strength as
+reasons why residual N and LMA track NDMI recovery in the Yosemite box but
+not in the Tahoe box. This section tests three further candidates.
+`proto_trait_directions.py --group` splits the cells, using cycle 1 only
+and the same residual traits and within-stratum ρ as §9.
+
+**Groups:**
+- **agent:** the dominant mortality agent that the Aerial Detection Survey
+  mapped in 2014–17. Classes are fir engraver, pine beetles (mountain,
+  western and Jeffrey pine beetle) and none. A class counts as dominant
+  when it covers ≥ 25% of the cell's pixels.
+- **host:** the dominant host of that mapped mortality: white fir,
+  California red fir or pine.
+- **cwd_late:** terciles of 2016's share of the cell's 2012–16 CWD anomaly.
+  The box-mean anomaly peaks in 2014 in the Yosemite box and in 2016 in the
+  Tahoe box.
+- **ewt_min:** the year of the cell's lowest June EWT in 2014–16. Most
+  cells reach it in 2016 in the Yosemite box and in 2015 in the Tahoe box;
+  20,000 Tahoe cells lack 2016 coverage.
+
+**Residual N / LMA vs NDMI recovery** (within-stratum ρ; 95% CIs from 1 km
+blocks; groups of ≥ 1,000 cells):
+
+| Group | NEON | `sierra_nf` | Tahoe box |
+|---|---|---|---|
+| all cells | +0.19 / −0.17 | +0.22 / −0.19 | +0.03 / +0.02 |
+| agent: fir engraver | +0.19 / −0.21 | +0.21 / −0.19 | +0.03 / +0.02 |
+| agent: pine beetles | +0.18 / −0.14 | +0.22 / −0.20 | +0.01 / +0.06 |
+| agent: none mapped | +0.16 / −0.16 | +0.20 / −0.12 | +0.04 / +0.02 |
+| host: white fir | +0.04 / −0.16 (1,635 cells) | +0.26 / −0.26 | +0.05 / −0.03 |
+| host: red fir | +0.26 / −0.28 | +0.19 / −0.20 | −0.01 / **+0.06** |
+| host: pine | +0.18 / −0.15 | +0.21 / −0.17 | +0.03 / +0.04 |
+| CWD peak late (top tercile) | +0.23 / −0.27 | +0.27 / −0.25 | +0.03 / +0.04 |
+| CWD peak early (bottom tercile) | +0.18 / −0.14 | +0.18 / −0.15 | +0.02 / +0.02 |
+| EWT minimum in 2015 | +0.17 / −0.14 | +0.27 / −0.22 | +0.04 / +0.01 |
+| EWT minimum in 2016 | +0.15 / −0.13 | +0.17 / −0.15 | −0.03 / +0.03 |
+
+**Structural carbon** (residual lignin and cellulose → worse recovery)
+holds in every group in both boxes. Lignin is −0.06 to −0.15 in the Tahoe
+box and −0.10 to −0.22 in the Yosemite box. The one exception is the 1,195
+Tahoe cells whose EWT minimum fell in 2014 (not significant).
+
+**Reading.**
+- **None of the three candidates explains the difference.** In the Tahoe
+  box, N and LMA stay near 0 in every agent, host and timing group,
+  including fir-engraver and red-fir cells and cells that are dry late in
+  the drought.
+- In the Yosemite box the leaf-economics direction holds in all those
+  groups. That includes the cells whose timing matches the Tahoe box (EWT
+  minimum in 2015: N +0.17 and +0.27).
+- The only Tahoe signal is a weak N direction under white-fir mortality
+  (+0.05 [0.02, 0.09]). Red-fir cells lean the other way for LMA (+0.06
+  [0.02, 0.12]).
+- **What separates the two boxes is a property of the box, not of these
+  stand attributes.** Untested candidates:
+  - **substrate and soils:** volcanic mudflow and andesitic soils are
+    common in the northern Sierra, granitic soils in the Yosemite box; the
+    link between foliar N and growth could differ with nutrient supply;
+  - species mixes that ADS host codes do not resolve;
+  - retrieval behaviour specific to the Tahoe box that the §9 calibration
+    checks would not catch.
+- The structural-carbon direction is the one that generalizes across
+  boxes, agents, hosts and drought timing.
 
 ## Summary
 
@@ -1117,26 +1382,49 @@ All entries have 95% CIs above 0 except Landsat-band resistance over ASO.
     - They hold at 30, 90 and 270 m (§19).
 11. **Spaceborne-like sampling keeps most of the recovery signal** (§18):
     85% for EMIT-like spectra and 95–102% for 30 m imaging-spectrometer-like
-    spectra, over lidar. Landsat-band proxies keep 64–80%, so much of the
-    signal is broadband.
+    spectra, over lidar.
+    - In a paired test (§20), full spectra beat *simulated* Landsat bands
+      for NDMI recovery (+0.004 to +0.014 over lidar).
+    - They do not beat a real Landsat 8 scene. Trait proxies emulated from
+      it match native AVIRIS over lidar at NEON and `sierra_nf`, and beat
+      the EMIT-like configuration.
+    - Without lidar, native AVIRIS traits still beat untrained Landsat
+      bands (+0.018 to +0.026).
 12. **Diversity is a small refinement** (≤ +0.016 beyond mean traits; §16).
     AVIRIS-5 and AVIRIS-C agree in rank but not level (§12). EMIT gives 1–3
     growing-season views per cell per year (§13).
+13. **The reversed cross-drought ranking at `sierra_nf` is an elevation
+    effect** (§21).
+    - The elevation gradient of every response flips between the two
+      droughts.
+    - Within elevation quartiles the transferred model ranks cells
+      correctly: NDMI recovery ρ +0.20 to +0.29, and +0.20 to +0.50 with
+      traits.
+    - The Creek Fire edge and recent treatments do not explain it.
+14. **The Tahoe-box leaf-economics gap is not mortality agent, host or
+    drought timing** (§22).
+    - In the Tahoe box, N and LMA stay near 0 in every ADS agent, host and
+      timing group.
+    - In the Yosemite box the direction holds in all of them.
+    - Structural carbon holds everywhere.
 
 ## Code
 
-`fetch_landsat_c2_ee.py`, `fetch_disturbance_aois.py`, `aoi_env_layers.py`,
+`fetch_landsat_c2_ee.py` (`--scene`), `fetch_disturbance_aois.py`, `aoi_env_layers.py`,
 `query_airborne_coverage.py`,
 `response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`,
 `proto_response_traits.py` (`--structure`, `--ablation`, `--neighbour`,
-`--traits`/`--cwc`, `--trait-year`, `--line-z`, `--gains-only`),
+`--traits`/`--cwc`, `--trait-year`, `--line-z`, `--raw-block`,
+`--save-preds`, `--gains-only`),
 `proto_response_transfer.py`, `query_lidar_coverage.py`,
 `fetch_lidar_structure.py`, `proto_lidar_validation.py`,
 `proto_trait_stability.py`, `fetch_wdts_cwc.py`, `fetch_wdts_traits.py`
 (`--date`, `--suffix`), `fetch_forest_type.py`,
-`proto_trait_directions.py`, `proto_forward_pilot.py`,
+`proto_trait_directions.py` (`--group`), `proto_forward_pilot.py`,
+`proto_transfer_diagnostics.py`,
 `proto_structure_from_spectra.py`, `proto_trait_diversity.py`,
-`proto_spaceborne_sim.py`, `proto_aviris5_bridge.py`,
+`proto_spaceborne_sim.py` (`refl`, `simulate` with `--l8`/`--seed`,
+`compare`), `proto_aviris5_bridge.py`,
 `query_emit_coverage.py`. Run from `src/` in
 the `ecopro` env. Earth Engine uses the Cloud project `ecopro-509818`.
 `shap` is installed with pip. Run concurrent model jobs with
