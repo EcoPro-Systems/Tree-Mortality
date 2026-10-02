@@ -57,6 +57,19 @@ proto_response_traits.py:
                            and the trait gain within each substrate
                            (ladder_substrate.csv)
 
+  retrieval    --trait-cells DIR --trait-source CFG:MODE (repeatable):
+               directions with the 2013 traits replaced by emulated ones
+               from proto_retrieval_transfer.py emulate (DIR/cells_<domain>
+               .csv.gz, cross-track normalized): MODE 'in' is the
+               configuration's emulator fitted out of fold on the AOI's own
+               maps, 'transfer' the emulator fitted in the other area or
+               box (Tahoe box: the pooled Yosemite-box emulator; NEON and
+               sierra_nf: each other's). If the Yosemite-trained retrieval
+               gives the Tahoe box the Yosemite-box N/LMA directions while
+               its own maps do not, the gap is in the retrieval. The maps
+               are rerun on the same cells ('maps'). Baseline variant only;
+               use a separate OUTPUTDIR.
+
 Residual traits are cross-fitted on Env+S over all cells (as in
 proto_response_traits.py), and ρ is averaged within aridity-tercile x
 200 m elevation strata. The 95% CIs come from a 1 km block bootstrap, with
@@ -380,6 +393,41 @@ def save(rows, path):
         pd.DataFrame(rows).to_csv(path, index=False)
 
 
+def retrieval_directions(d, aoi, cells_dir, sources, n_boot, scale_m):
+    """Directions with the 2013 traits from emulated retrievals, on the
+    cells every source covers"""
+    from proto_retrieval_transfer import DOMAINS, TRANSFERS
+    dom = next(k for k, (a, y) in DOMAINS.items()
+               if a == aoi and y == 2013)
+    cells = pd.read_csv(cells_dir / f'cells_{dom}.csv.gz')
+    y0 = trait_year(d)
+    src = {s: s.replace(':transfer', ':' + TRANSFERS[dom][0])
+           for s in sources}
+    need = [f'{v}:{t}' for v in src.values() for t in TRAITS]
+    cells = cells[['cell_row', 'cell_col'] + need].dropna()
+    d = d.merge(cells, on=['cell_row', 'cell_col'], how='inner')
+    click.echo(f'[{aoi}] {len(d)} cells with every retrieval '
+               f'({", ".join(src.values())})')
+    rows = []
+    for name, v in [('maps', None)] + list(src.items()):
+        dv = d.copy()
+        if v is not None:
+            for t in TRAITS:
+                dv[f'T_{t}_{y0}'] = dv[f'{v}:{t}']
+        R = residual_traits(dv)
+        dd = pd.concat([dv, R], axis=1)
+        r = directions(dd, [f'R_{t}' for t in FOCUS], TARGETS[:2], n_boot,
+                       aoi=aoi, scale_m=scale_m, variant=name, source=v
+                       or 'maps', subset='all')
+        rows += r
+        g = {x['feature']: x for x in r if x['target'] == 'ndmi_recovery'}
+        click.echo(f'  {name:16s} ' + '  '.join(
+            f'{t} {g[f"R_{t}"]["rho_within"]:+.3f}'
+            f'[{g[f"R_{t}"]["lo"]:+.2f},{g[f"R_{t}"]["hi"]:+.2f}]'
+            for t in FOCUS))
+    return rows
+
+
 @click.command()
 @click.argument('outputdir', type=click.Path(path_type=Path))
 @click.option('-a', '--aoi', 'aois', multiple=True, required=True)
@@ -397,8 +445,13 @@ def save(rows, path):
 @click.option('--group', 'groups', multiple=True, type=click.Choice(GROUPS),
               help='Directions within ADS agent/host, drought-timing or '
                    'substrate groups (baseline variant)')
+@click.option('--trait-cells', type=click.Path(path_type=Path, exists=True),
+              help='proto_retrieval_transfer.py emulate output directory')
+@click.option('--trait-source', 'trait_sources', multiple=True,
+              help='CFG:MODE emulated traits from --trait-cells (MODE in, '
+                   'transfer or a source domain); repeatable')
 def main(outputdir, aois, variants, response_dirs, dynamics_dir, scale,
-         n_boot, skip_ladder, groups):
+         n_boot, skip_ladder, groups, trait_cells, trait_sources):
     outputdir.mkdir(parents=True, exist_ok=True)
     scale_m = rc.RES * scale
     rows, lad, sig, grows, glad = [], [], [], [], []
@@ -407,6 +460,13 @@ def main(outputdir, aois, variants, response_dirs, dynamics_dir, scale,
         rdir = next(rc.E / 'hls_results' / r for r in response_dirs
                     if (rc.E / 'hls_results' / r /
                         f'metrics_{aoi}_{scale_m}m.csv').exists())
+        if trait_sources:
+            paths, y0, per_line = variant_args(aoi, 'baseline')
+            d = build(aoi, scale, rdir, dynamics_dir, paths, y0, per_line)
+            rows += retrieval_directions(d, aoi, trait_cells, trait_sources,
+                                         n_boot, scale_m)
+            save(rows, outputdir / 'directions.csv')
+            continue
         ft = forest_type(aoi, scale)
         for v in variants:
             args = variant_args(aoi, v)
