@@ -27,6 +27,8 @@ analysed the same way.
 | Fire and harvest polygons | `fire/disturbance/{frap_fires,rx_fires,facts_harvest}.gpkg` | From `fetch_disturbance_aois.py`: CAL FIRE FRAP perimeters (all sizes), CAL FIRE prescribed-fire perimeters, USFS FACTS timber-harvest activities (EDW) |
 | AVIRIS flight-line inventory | `aviris_locator/AVIRIS-{C,NG}_flight_{table.csv,s.geojson}` | [ORNL DAAC 2140](https://doi.org/10.3334/ORNLDAAC/2140) flight tables (to Aug 2024) |
 | WDTS traits and canopy water | `wdts/<aoi>_traits.nc`, `wdts/<aoi>_cwc.nc` | As before. `fetch_wdts_cwc.py` now also saves `nadir_dist`. `stanislaus` traits (Tahoe box, UTM 11) are warped onto the UTM 10 AOI grid with nearest neighbour; no canopy water there yet |
+| Geology | `env/<aoi>_geology.nc`; source in `geology/` | From `fetch_geology.py`: USGS State Geologic Map Compilation, California (1:750,000), grouped into granitic, volcanic, metamorphic, surficial and other on the 30 m grids |
+| Reflectance caches for emulated retrievals | `wdts/sim/<aoi>_refl<year>.nc`, `wdts/sim/<aoi>_l8_<date>.nc` | From `proto_spaceborne_sim.py refl` (2013; 2018 for NEON and `sierra_nf`; 2013 for `stanislaus`) and `fetch_landsat_c2_ee.py --scene` (2013-06-21, 2013-06-28 Tahoe, 2018-06-19) |
 | Airborne lidar structure | `lidar/<aoi>_lidar.nc`; raw in `lidar/aso/`, `lidar/lvis2008/` | From `fetch_lidar_structure.py`: ASO 2014–17 composite (Ferraz et al. 2020) and LVIS Sep 2008 footprints on the 30 m grids. Coverage and sources: `lidar_coverage.md` |
 
 ## Airborne imaging spectroscopy over the study boxes, 2018–2025 (`hls_results/airborne_coverage/`)
@@ -1321,6 +1323,566 @@ Tahoe cells whose EWT minimum fell in 2014 (not significant).
 - The structural-carbon direction is the one that generalizes across
   boxes, agents, hosts and drought timing.
 
+### 23. Spaceborne-like VSWIR vs Landsat without lidar or local airborne training (`hls_results/spaceborne_only/`)
+
+§20 compared spaceborne-like VSWIR with Landsat trait proxies trained on the
+AVIRIS maps of the same place and date (l8). Beyond the airborne boxes there
+are no such maps, and no wall-to-wall lidar. This section uses Landsat
+controls that need no airborne training, and models with no lidar.
+
+**Method** (`proto_spaceborne_only.py compare`).
+- Blocks:
+  - the emulated 2013 VSWIR retrievals of §18/§20 (native, emit, sbg_hi,
+    sbg_lo) and l8;
+  - **l8raw:** the 2013-06-21 Landsat 8 scene's bands and indices (§20);
+  - **l8multi (new):** the same variables from the June (DOY 145–190) and
+    Jul–Sep (DOY 182–273) 2013 Landsat 8 composites. Time series are what
+    make multispectral trait proxies work (e.g. Liu et al. 2024, Sentinel-2).
+- All blocks go into one cell table, so every model shares the cells and
+  folds. Differences in R² are paired by construction.
+- Over Env+S, no lidar: Env+S | Env+S+T<block>.
+- **Spaceborne stack:** Env+S+Ŝ+T, where Ŝ is the lidar structure predicted
+  out of fold from the *same* block (with wall-to-wall structure and
+  Landsat baseline greenness, as in §15). It is scored against
+  Env+S+L+T(native): lidar plus airborne retrievals.
+- The Jul–Sep 2013 composite is one of the twelve years the stress-response
+  slope is fitted on, so l8multi is partly circular for that target.
+  Recovery (2017–19 vs 2014–16) does not use 2013.
+
+**NEON, over Env+S** (44,079 cells; ΔR² with paired 95% CIs, 1 km blocks):
+
+| Block | NDMI recovery | − l8raw | − l8multi | NIRv recovery − l8multi | Stress response − l8multi |
+|---|---|---|---|---|---|
+| native | +0.068 | **+0.022** | **+0.007** [0.001, 0.014] | −0.006 (n.s.) | **−0.009** |
+| emit | +0.055 | **+0.009** | −0.005 [−0.011, 0.001] | **−0.008** | **−0.007** |
+| sbg_hi | +0.058 | **+0.012** | −0.003 (n.s.) | **−0.008** | **−0.008** |
+| sbg_lo | +0.064 | **+0.019** | +0.004 [−0.002, 0.011] | −0.005 (n.s.) | **−0.007** |
+| l8 | +0.054 | **+0.009** | **−0.006** | **−0.012** | **−0.008** |
+| l8raw | +0.046 | – | **−0.015** | **−0.017** | **−0.008** |
+| l8multi | **+0.060** | **+0.015** | – | – | – |
+
+Bold: CI excludes 0. Over 5 km blocks the intervals widen, and native −
+l8multi becomes [−0.002, 0.020].
+
+**`sierra_nf`, over Env+S** (58,676 cells):
+
+| Block | NDMI recovery | − l8raw | − l8multi | NIRv recovery − l8multi | Stress response − l8multi |
+|---|---|---|---|---|---|
+| native | +0.094 | **+0.034** | **+0.019** [0.014, 0.026] | +0.005 (n.s.) | **−0.013** |
+| emit | +0.072 | **+0.012** | −0.002 [−0.008, 0.003] | **−0.009** | **−0.015** |
+| sbg_hi | +0.074 | **+0.014** | −0.001 (n.s.) | **−0.006** | **−0.020** |
+| sbg_lo | +0.084 | **+0.024** | **+0.009** [0.004, 0.015] | −0.001 (n.s.) | **−0.017** |
+| l8 | +0.083 | **+0.023** | **+0.008** | −0.001 (n.s.) | **−0.016** |
+| l8raw | +0.060 | – | **−0.014** | **−0.018** | **−0.010** |
+| l8multi | +0.075 | **+0.014** | – | – | – |
+
+**Spaceborne stack, NEON over ASO** (29,004 cells; R², and paired
+differences for NDMI recovery):
+
+| Inputs | NDMI recovery | NIRv recovery | Stress response | NDMI recovery − l8multi stack |
+|---|---|---|---|---|
+| Env+S | 0.506 | 0.402 | 0.509 | |
+| Env+S+L+T(native), reference | 0.652 | 0.540 | 0.589 | |
+| native | 0.615 (0.94) | 0.504 | 0.565 | **+0.011** [0.001, 0.020] |
+| emit | 0.604 (0.93) | 0.506 | 0.567 | −0.000 [−0.009, 0.009] |
+| sbg_hi | 0.607 (0.93) | 0.504 | 0.566 | +0.003 (n.s.) |
+| sbg_lo | 0.619 (0.95) | 0.510 | 0.570 | **+0.015** [0.005, 0.024] |
+| l8raw | 0.590 (0.91) | 0.498 | 0.569 | **−0.014** |
+| l8multi | 0.604 (0.93) | 0.516 | 0.586 | – |
+
+In brackets: share of the reference R² kept.
+
+Over LVIS 2008 (21,826 cells; reference 0.656 for NDMI recovery) the stacks
+keep 0.88 (l8raw) to 0.95 (native) of the reference. Against the l8multi
+stack: native **+0.025**, sbg_lo **+0.022** [0.010, 0.035], sbg_hi +0.010
+[−0.001, 0.022], emit +0.002 (n.s.).
+
+Over ASO at `sierra_nf` (48,731 cells; reference 0.643 for NDMI recovery)
+the stacks keep 0.90 (l8raw) to 0.95 (native): emit 0.92, sbg_hi 0.92,
+sbg_lo 0.94, l8multi 0.93. Against the l8multi stack: native **+0.014**,
+sbg_lo +0.006 [−0.000, 0.012], sbg_hi −0.004 (n.s.), emit **−0.009**. For
+stress response every VSWIR stack is below both Landsat stacks.
+
+**Reading.**
+- **Spaceborne-like VSWIR beats a single Landsat scene** for NDMI recovery
+  at both areas (EMIT-like +0.009 / +0.012, 30 m +0.012 to +0.024) and for
+  NIRv recovery, with no airborne training on either side.
+- **It does not beat a multi-date Landsat block.**
+  - For NDMI recovery the EMIT-like and the noisier 30 m configuration tie
+    with it at both areas (−0.005 to −0.001). The low-noise 30 m
+    configuration is ahead at `sierra_nf` (+0.009) but not at NEON
+    (+0.004, n.s.).
+  - For NIRv recovery and stress response, l8multi equals or beats every
+    VSWIR block.
+  - Native AVIRIS beats it at both areas (+0.007, +0.019).
+- **Without lidar, the full stack keeps 88–95% of the lidar-plus-AVIRIS
+  reference for NDMI recovery, whatever the inputs.** The multi-date
+  Landsat stack keeps as much as the EMIT-like one (0.91–0.93) and beats
+  it at `sierra_nf` (−0.009). The low-noise 30 m stack is ahead of it at
+  NEON over both lidar sources (+0.015, +0.022), not at `sierra_nf`
+  (+0.006, n.s.).
+- A second June scene and a summer composite give Landsat what one scene
+  lacks. Most of the recovery-relevant information that spaceborne-like
+  VSWIR carries, multi-date multispectral data carry too.
+
+### 24. Is structural carbon a VSWIR signal? (`hls_results/spaceborne_only/carbon_<aoi>/`)
+
+The structural-carbon direction (high lignin, cellulose and fiber → worse
+recovery) is the one that replicates in both boxes (§8, §9, §22). Is it
+something spaceborne VSWIR resolves and Landsat does not? Broadband "trait"
+proxies may carry canopy structure and greenness rather than chemistry
+(Knyazikhin et al. 2013).
+
+**Method** (`proto_spaceborne_only.py carbon`). The same NEON cells and blocks
+as §23.
+1. **Blocks of single trait groups** over Env+S, per emulated configuration:
+   - SC: lignin, cellulose, fiber;
+   - NL: nitrogen, LMA.
+2. **The same blocks on top of Landsat alone** (Env+S+l8raw, Env+S+l8multi),
+   paired against the same traits emulated from real Landsat (l8). l8 is
+   the negative control: its traits are functions of the scene's bands.
+3. **Residual-trait directions** (within-stratum ρ, 1 km block-bootstrap
+   CIs, as in §22), with each trait cross-fitted on Env+S, and on
+   Env+S+l8raw (what the trait carries beyond the Landsat bands).
+
+**NDMI recovery, NEON** (ΔR², 95% CI):
+
+| SC or NL from | SC over Env+S | SC over Env+S+l8raw (− the l8 SC) | SC over Env+S+l8multi (− the l8 SC) | NL over Env+S+l8multi (− the l8 NL) |
+|---|---|---|---|---|
+| native | +0.032 | +0.016 (**+0.013**) | +0.014 (**+0.009**) | +0.006 (+0.002, n.s.) |
+| emit | +0.024 | +0.010 (**+0.006**) | +0.008 (**+0.004**) | +0.004 (+0.001, n.s.) |
+| sbg_lo | +0.032 | +0.013 (**+0.010**) | +0.012 (**+0.007**) | +0.004 (+0.001, n.s.) |
+| l8 | +0.038 | +0.004 | +0.004 | +0.004 |
+
+For NIRv recovery the VSWIR SC blocks also add over the Landsat blocks
+(+0.007 to +0.010), but their lead over the l8 SC block is not
+distinguishable from 0 (+0.004 to +0.006).
+
+**NDMI recovery, `sierra_nf`** (58,676 cells; same columns):
+
+| SC or NL from | SC over Env+S | SC over Env+S+l8raw (− the l8 SC) | SC over Env+S+l8multi (− the l8 SC) | NL over Env+S+l8multi (− the l8 NL) |
+|---|---|---|---|---|
+| native | +0.045 | +0.016 (**+0.005**) | +0.011 (**+0.004**) | +0.012 (−0.002, n.s.) |
+| emit | +0.031 | +0.009 (−0.002, n.s.) | +0.004 (−0.003, n.s.) | +0.009 (**−0.005**) |
+| sbg_lo | +0.040 | +0.012 (+0.001, n.s.) | +0.007 (+0.000, n.s.) | +0.009 (**−0.005**) |
+| l8 | +0.052 | +0.011 | +0.007 | +0.014 |
+
+**Residual directions vs NDMI recovery** (within-stratum ρ):
+
+| Traits from | Residual on | Lignin | Cellulose | Fiber | N | LMA |
+|---|---|---|---|---|---|---|
+| maps | Env+S | −0.17 | −0.15 | −0.19 | +0.19 | −0.17 |
+| emit | Env+S | −0.14 [−0.17, −0.11] | −0.13 [−0.16, −0.11] | −0.17 | +0.18 | −0.15 |
+| sbg_lo | Env+S | −0.16 | −0.16 | −0.20 | +0.19 | −0.15 |
+| l8 | Env+S | −0.19 | **−0.02** [−0.04, 0.01] | −0.15 | +0.23 | −0.19 |
+| maps | Env+S+l8raw | −0.11 | −0.12 | −0.13 | +0.09 | −0.06 |
+| emit | Env+S+l8raw | −0.09 [−0.11, −0.06] | −0.11 [−0.13, −0.08] | −0.11 | +0.07 | −0.04 |
+| sbg_lo | Env+S+l8raw | −0.10 | −0.13 | −0.13 | +0.08 | −0.04 |
+| l8 | Env+S+l8raw | −0.07 | **−0.03** | −0.06 | +0.08 | −0.06 |
+
+At `sierra_nf`:
+
+| Traits from | Residual on | Lignin | Cellulose | Fiber | N | LMA |
+|---|---|---|---|---|---|---|
+| maps | Env+S | −0.18 | −0.16 | −0.18 | +0.21 | −0.19 |
+| emit | Env+S | −0.15 [−0.17, −0.14] | −0.12 [−0.14, −0.11] | −0.16 | +0.20 | −0.17 |
+| sbg_lo | Env+S | −0.18 | −0.16 | −0.19 | +0.21 | −0.18 |
+| l8 | Env+S | −0.15 | **−0.03** [−0.05, −0.01] | −0.13 | +0.24 | −0.21 |
+| maps | Env+S+l8raw | −0.13 | −0.12 | −0.13 | +0.13 | −0.11 |
+| emit | Env+S+l8raw | −0.10 [−0.11, −0.08] | −0.08 [−0.10, −0.07] | −0.10 | +0.11 | −0.09 |
+| sbg_lo | Env+S+l8raw | −0.12 | −0.10 | −0.12 | +0.12 | −0.09 |
+| l8 | Env+S+l8raw | **−0.06** | **−0.02** | **−0.06** | +0.12 | −0.10 |
+
+**Reading.**
+- **The structural-carbon *direction* is a VSWIR signal, at both areas.**
+  - Emulated from spaceborne-like spectra, structural carbon keeps the
+    directions of the maps (EMIT-like lignin −0.14 / −0.15, cellulose
+    −0.13 / −0.12 at NEON / `sierra_nf`, CIs excluding 0).
+  - Emulated from Landsat, cellulose loses its direction (−0.02 / −0.03).
+  - Beyond the Landsat bands, VSWIR lignin and cellulose still go with
+    worse recovery (−0.08 to −0.13). Landsat "lignin" and "cellulose" keep
+    only −0.02 to −0.07.
+- **The added *skill* is VSWIR-specific at NEON only.**
+  - At NEON, VSWIR structural carbon adds more on top of either Landsat
+    block than the l8 version does (+0.004 to +0.013).
+  - At `sierra_nf` it adds no more than the l8 version (−0.003 to +0.001);
+    only native AVIRIS does (+0.004 to +0.005).
+- **Leaf economics is not a VSWIR signal.**
+  - N and LMA from VSWIR add no more beyond the multi-date Landsat block
+    than the Landsat-emulated N and LMA do (`sierra_nf`: less, −0.005).
+  - Their directions beyond the Landsat bands are the same for every
+    source.
+- **Alone, the Landsat-emulated blocks add the most** (SC +0.038 / +0.052;
+  NL +0.036 / +0.068). The broadband proxy carries skill, but as greenness
+  and structure rather than chemistry: its cellulose has no direction.
+
+### 25. Do trait retrievals carry over to another area or date? (`hls_results/retrieval_transfer/`)
+
+A Landsat trait proxy is trained on AVIRIS maps of the same place and date.
+Does a spaceborne-like VSWIR retrieval need that too, or does it hold where
+it was not trained?
+
+**Method** (`proto_retrieval_transfer.py`).
+- **Emulators** (as in §18): PLSR (25 components; rerun with 10, below)
+  from log inputs to the 2403 maps, for native, emit and sbg_lo (VSWIR), and two Landsat proxies:
+  - l8: one Landsat 8 scene near the flight;
+  - l8multi: the June and Jul–Sep composites of the year.
+  Noise draws are seeded per domain.
+- **Transfers** (fit on the source, apply to the target):
+
+  | Leg | Source → target | Responses scored |
+  |---|---|---|
+  | Across areas | NEON 2013 ↔ `sierra_nf` 2013 (same flight day and Landsat scene) | cycle 1 |
+  | Across boxes | Yosemite box 2013 (both AOIs) → Tahoe box 2013 (June 4 flight, non-`_v2`, Landsat path 43, 2013-06-28) | cycle 1 only |
+  | Across dates | NEON 2013 → NEON 2018 and `sierra_nf` 2013 → 2018 (June 22 flight, non-`_v2`, Landsat 2018-06-19) | cycle 2 (pilot AOIs) |
+
+- New inputs:
+  - the June 2018 reflectance for NEON and `sierra_nf`, and the Tahoe
+    2013 reflectance (`proto_spaceborne_sim.py refl --year`);
+  - Landsat 8 scenes 2018-06-19 and (Tahoe) 2013-06-28. The 2013-06-12
+    Tahoe scene is only 48% clear.
+- Pixels: those whose spectra come from the trait mosaic's own line, with
+  every configuration's inputs present.
+  - The Tahoe 2013 lines have no 1323 and 1333 nm data. Those bands leave
+    the usable set there.
+- **In place:** the same configuration's emulator fitted out of fold over
+  1 km blocks within the target.
+- **Scores** on the 90 m cells with responses, with paired 1 km block
+  bootstraps:
+  - agreement with the target's AVIRIS maps (ρ);
+  - the NDMI-recovery gain over Env+S with in-place vs transferred traits;
+  - the difference in loss (VSWIR − Landsat proxy; negative means VSWIR
+    loses less);
+  - transferred VSWIR against Landsat alone (l8raw, l8multi as raw blocks).
+    In the first four 25-component legs the raw l8multi contrast replaced
+    the one against the transferred l8multi emulator, which shared its
+    name; later runs keep both (`*_raw` contrasts).
+
+**NDMI-recovery gain over Env+S, in place → transferred:**
+
+| Target (cells) | native | emit | sbg_lo | l8 | l8multi | l8raw (raw) | l8multi (raw) |
+|---|---|---|---|---|---|---|---|
+| NEON 2013 ← `sierra_nf` (43,247) | +0.061 → +0.058 | +0.048 → +0.048 | +0.056 → +0.057 | +0.049 → +0.051 | +0.060 → +0.058 | +0.042 | +0.057 |
+| `sierra_nf` 2013 ← NEON (58,239) | +0.085 → +0.088 | +0.064 → +0.070 | +0.078 → +0.080 | +0.084 → +0.080 | +0.088 → +0.087 | +0.061 | +0.075 |
+| Tahoe 2013 ← Yosemite box (55,106) | +0.037 → +0.022 | +0.039 → +0.030 | +0.046 → +0.031 | +0.042 → +0.031 | +0.044 → +0.040 | +0.036 | +0.047 |
+| NEON 2018 ← NEON 2013 (23,251; cycle 2) | +0.063 → +0.061 | +0.055 → +0.056 | +0.062 → +0.062 | +0.070 → +0.073 | +0.080 → +0.081 | +0.077 | +0.087 |
+| `sierra_nf` 2018 ← 2013 (20,809; cycle 2) | +0.098 → +0.081 | +0.086 → +0.071 | +0.092 → +0.084 | +0.099 → +0.103 | +0.097 → +0.105 | +0.108 | +0.114 |
+
+**Paired contrasts, NDMI recovery** (95% CI):
+
+| Contrast | NEON ← `sierra_nf` | `sierra_nf` ← NEON | Tahoe ← Yosemite | NEON 2018 ← 2013 | `sierra_nf` 2018 ← 2013 |
+|---|---|---|---|---|---|
+| loss, emit − loss, l8 | +0.003 (n.s.) | **−0.009** | −0.002 (n.s.) | +0.002 (n.s.) | **+0.019** |
+| loss, emit − loss, l8multi | −0.002 (n.s.) | **−0.006** | +0.005 (n.s.) | −0.001 (n.s.) | **+0.022** |
+| loss, sbg_lo − loss, l8multi | −0.003 (n.s.) | −0.003 (n.s.) | +0.010 [−0.001, 0.022] | +0.001 (n.s.) | **+0.015** |
+| transferred emit − l8multi raw block | **−0.009** | −0.005 [−0.011, 0.000] | **−0.017** | **−0.031** | **−0.043** |
+| transferred sbg_lo − l8multi raw block | −0.001 (n.s.) | +0.005 (n.s.) | **−0.016** | **−0.025** | **−0.030** |
+| transferred sbg_lo − l8raw | **+0.014** | **+0.019** | −0.004 (n.s.) | **−0.015** | **−0.023** |
+
+**Agreement with the target's AVIRIS maps** (ρ, transferred; native / emit /
+sbg_lo / l8 / l8multi), and the paired difference in loss of ρ (emit − l8):
+
+| Target | Nitrogen | LMA | Lignin | Cellulose |
+|---|---|---|---|---|
+| NEON 2013 | 0.90 / 0.89 / 0.92 / 0.76 / 0.83 (**−0.03**) | 0.99 / 0.97 / 0.98 / 0.87 / 0.90 (**−0.02**) | 0.76 / 0.74 / 0.83 / 0.55 / 0.61 (+0.02) | 0.82 / 0.81 / 0.85 / 0.72 / 0.71 (**+0.03**) |
+| `sierra_nf` 2013 | 0.89 / 0.85 / 0.89 / 0.67 / 0.71 (**−0.02**) | 0.95 / 0.91 / 0.94 / 0.75 / 0.76 (+0.01) | 0.83 / 0.76 / 0.82 / 0.59 / 0.63 (**+0.07**) | 0.71 / 0.75 / 0.80 / 0.64 / 0.67 (**+0.06**) |
+| Tahoe 2013 | 0.72 / 0.85 / 0.76 / 0.67 / 0.73 (**−0.03**) | 0.55 / 0.69 / 0.84 / 0.71 / 0.76 (**+0.19**) | 0.27 / 0.75 / 0.63 / 0.68 / 0.71 (**+0.08**) | 0.07 / 0.77 / 0.67 / 0.68 / 0.65 (**+0.07**) |
+| NEON 2018 | 0.89 / 0.91 / 0.93 / 0.80 / 0.81 (**−0.02**) | 0.96 / 0.94 / 0.96 / 0.84 / 0.87 (**−0.03**) | 0.89 / 0.48 / 0.65 / 0.42 / 0.50 (**+0.15**) | 0.87 / 0.63 / 0.69 / 0.63 / 0.62 (**+0.11**) |
+
+**`sierra_nf` 2018, map agreement** (ρ, transferred; native / emit / sbg_lo /
+l8 / l8multi): N 0.90 / 0.85 / 0.90 / 0.74 / 0.75; LMA 0.95 / 0.89 / 0.94 /
+0.79 / 0.82; lignin 0.88 / 0.76 / 0.87 / 0.63 / 0.66; cellulose 0.85 / 0.78 /
+0.85 / 0.77 / 0.73.
+
+**Rerun with 10-component emulators** (`hls_results/retrieval_transfer_nc10/`;
+§26 found 10 components carry across sensors and 25 do not).
+
+| Contrast, NDMI recovery | NEON ← `sierra_nf` | `sierra_nf` ← NEON | Tahoe ← Yosemite | NEON 2018 ← 2013 | `sierra_nf` 2018 ← 2013 |
+|---|---|---|---|---|---|
+| loss, emit − loss, l8 | +0.004 (n.s.) | **−0.004** | −0.011 [−0.024, 0.003] | −0.001 (n.s.) | **+0.013** |
+| loss, emit − loss, l8multi | −0.002 (n.s.) | −0.001 (n.s.) | −0.002 (n.s.) | −0.003 (n.s.) | **+0.013** |
+| loss, sbg_lo − loss, l8multi | −0.003 (n.s.) | −0.001 (n.s.) | **+0.011** | −0.001 (n.s.) | +0.008 (n.s.) |
+| transferred emit − l8multi raw block | **−0.011** | **−0.010** | −0.012 [−0.026, 0.002] | **−0.029** | **−0.043** |
+| transferred sbg_lo − l8multi raw block | −0.005 (n.s.) | −0.000 (n.s.) | **−0.022** | **−0.027** | **−0.032** |
+| transferred sbg_lo − l8raw | **+0.010** | **+0.014** | −0.011 (n.s.) | **−0.017** | **−0.025** |
+
+Map agreement after transfer with 10 components (ρ; native / emit / sbg_lo /
+l8 / l8multi):
+
+| Target | Nitrogen | LMA | Lignin | Cellulose |
+|---|---|---|---|---|
+| NEON 2013 | 0.93 / 0.89 / 0.91 / 0.76 / 0.83 | 0.99 / 0.97 / 0.98 / 0.87 / 0.90 | 0.81 / 0.71 / 0.80 / 0.55 / 0.61 | 0.81 / 0.79 / 0.82 / 0.72 / 0.72 |
+| `sierra_nf` 2013 | 0.85 / 0.81 / 0.85 / 0.67 / 0.71 | 0.93 / 0.90 / 0.92 / 0.75 / 0.77 | 0.83 / 0.75 / 0.80 / 0.59 / 0.63 | 0.83 / 0.74 / 0.78 / 0.64 / 0.68 |
+| Tahoe 2013 | 0.47 / 0.78 / 0.71 / 0.67 / 0.73 | 0.83 / 0.66 / 0.93 / 0.71 / 0.76 | **0.86** / 0.82 / 0.88 / 0.68 / 0.71 | **0.75** / 0.78 / 0.76 / 0.68 / 0.65 |
+| NEON 2018 | 0.93 / 0.91 / 0.93 / 0.80 / 0.81 | 0.96 / 0.94 / 0.96 / 0.84 / 0.87 | 0.73 / 0.40 / 0.55 / 0.42 / 0.49 | 0.75 / 0.61 / 0.67 / 0.63 / 0.61 |
+| `sierra_nf` 2018 | 0.87 / 0.85 / 0.89 / 0.74 / 0.75 | 0.94 / 0.87 / 0.92 / 0.79 / 0.82 | 0.83 / 0.75 / 0.84 / 0.63 / 0.66 | 0.61 / 0.77 / 0.83 / 0.77 / 0.73 |
+
+**Reading.**
+- **Transferred VSWIR retrievals do not lose less recovery skill than
+  transferred Landsat proxies,** with 25 or with 10 components.
+  - Across the Yosemite box transfer costs almost nothing for anyone
+    (losses within ±0.005).
+  - To the Tahoe box every configuration loses some; the VSWIR − Landsat
+    differences in loss include 0 (one exception each way).
+  - From 2013 to 2018, nobody loses at NEON. At `sierra_nf` VSWIR loses
+    *more* than the Landsat proxies (+0.008 to +0.022), which gain.
+- **Landsat alone, with no airborne training, matches or beats transferred
+  VSWIR outside the training area and date.** The multi-date block is
+  ahead of transferred EMIT-like traits in the Tahoe box (+0.012 to +0.017)
+  and in 2018 (+0.029 to +0.043, both AOIs). Transferred VSWIR beats a
+  single Landsat scene only within the Yosemite box in 2013.
+- **Map agreement after transfer:**
+  - VSWIR keeps higher absolute agreement than the Landsat proxies for N,
+    LMA and (with 10 components) lignin in most legs, e.g. Tahoe lignin
+    0.82–0.88 against 0.68–0.71.
+  - That advantage in agreement does not turn into recovery skill.
+  - EMIT-like lignin transferred to NEON 2018 is the weak spot (0.40–0.48).
+- **Emulator size.** With 25 components, native AVIRIS collapses in the
+  Tahoe box (lignin 0.27, cellulose 0.07). With 10 components it holds
+  (0.86, 0.75), as §26 found across sensors. The recovery-skill conclusions
+  do not change.
+- In 2018 the Landsat blocks are especially strong (+0.087 to +0.114 for the
+  multi-date block). They share sensor, registration and the Jul–Sep
+  compositing with the Landsat 8/9 cycle-2 responses, which may favour them
+  (as in §20).
+- **Caveats:** emulated, not published, retrievals; one transfer per leg;
+  the 2018 and Tahoe mosaics are not cross-year calibrated, which affects
+  every configuration's agreement with the maps.
+
+### 26. The AVIRIS-5 bridge at a second area, and for traits (`hls_results/aviris5_bridge/`)
+
+§12 compared AVIRIS-Classic and AVIRIS-5 on the same day at NEON only, and
+for reflectance and EWT only. This section repeats it over `sierra_nf` and
+adds traits at both areas.
+
+**Data** (`proto_aviris5_bridge.py`).
+- Both instruments flew `sierra_nf` on July 17, 2025:
+  - AVIRIS-C lines `f250717t01p00r09` to `r13` (ORNL DAAC 2154);
+  - AVIRIS-5 scenes `AV520250717t175725_003/_004`, `t181601_004/_005` and
+    `t183638_003` (ORNL DAAC 2484). These are the five of the eleven that
+    cover the most of the AOI.
+- The method is the same as §12: area averaging to 30 m, AVIRIS-5 convolved
+  to the AVIRIS-C bands, and a nearest-nadir mosaic per sensor. Lines are
+  now folded into the mosaic one at a time, which bounds memory.
+- 17,497 undisturbed forest 90 m cells are covered by both sensors (NEON:
+  15,784). Rerunning NEON reproduces §12 exactly.
+
+**Reflectance and canopy water.** NEON values are from §12.
+
+| | NEON | `sierra_nf` |
+|---|---|---|
+| EWT980 ρ (AVIRIS-5 − AVIRIS-C) | 0.976 (+0.029 cm, +13%) | **0.903** (+0.021 cm, +9%) |
+| NDVI ρ (bias) | 0.958 (+0.049) | 0.931 (+0.039) |
+| NDWI ρ (bias) | 0.952 (−0.055) | 0.916 (−0.057) |
+| 450–700 nm: relative difference, ρ | −4%, 0.80 | −4%, 0.71 |
+| 700–1300 nm | +18%, 0.70 | +11%, 0.70 |
+| 1450–1800 nm | +24%, 0.81 | +19%, 0.78 |
+| 2000–2400 nm | +3%, 0.83 | −0%, 0.83 |
+
+- The same pattern holds at the second area: AVIRIS-5 reads brighter in
+  the NIR and SWIR-1, and agrees in rank.
+- Rank agreement is somewhat lower at `sierra_nf`, which has more lines, a
+  wider spread of view angles, and steeper terrain. EWT ρ is 0.90, below
+  NEON's 0.98.
+
+**Traits.**
+- *Emulator.* The 2403 PLSR coefficients are not public, so one emulator
+  per AOI is fitted, as in §18. It is a PLSR from log reflectance to the
+  2403 trait maps, fitted on the June 2018 AVIRIS-C reflectance
+  (`wdts/sim/<aoi>_refl2018.nc`, the most recent year with both spectra
+  and a trait map; only pixels from the line the map used).
+- *Application.* The emulator is applied unchanged to both 2025 mosaics,
+  each interpolated onto the 2018 band centres. Both 2025 inputs go
+  through the same emulator, so their agreement measures how consistently
+  the two sensors support one retrieval. It does not measure the
+  retrieval's accuracy.
+- *Input variants.*
+  - **raw:** each mosaic as delivered.
+  - **matched:** each mosaic's per-band log reflectance is rescaled to the
+    mean and SD of the 2018 training pixels. This is a scene-level
+    calibration that removes per-band level and gain offsets.
+- *Model size.* Emulators with 5, 10 and 25 PLSR components (25 is the §18
+  setting). Out-of-fold R² in 2018 (1 km blocks) is given for reference.
+
+Spearman ρ between AVIRIS-C and AVIRIS-5 on the same 90 m cells (raw inputs;
+matched in brackets):
+
+| Trait | Components | NEON | `sierra_nf` |
+|---|---|---|---|
+| Nitrogen | 5 | 0.79 (0.80) | 0.72 (0.72) |
+| | 10 | **0.89** (0.85) | **0.73** (0.67) |
+| | 25 | 0.39 (0.18) | 0.28 (0.07) |
+| LMA | 5 | 0.77 (0.77) | 0.73 (0.74) |
+| | 10 | **0.90** (0.87) | **0.76** (0.69) |
+| | 25 | 0.79 (0.59) | 0.67 (0.45) |
+| Lignin | 5 | 0.64 (0.60) | 0.57 (0.59) |
+| | 10 | **0.77** (0.78) | **0.66** (0.66) |
+| | 25 | 0.68 (0.60) | 0.56 (0.69) |
+| Cellulose | 5 | 0.65 (0.71) | 0.63 (0.61) |
+| | 10 | **0.68** (0.53) | **0.57** (0.67) |
+| | 25 | 0.53 (0.54) | 0.25 (0.48) |
+
+Emulator out-of-fold R² in 2018 (5 / 10 / 25 components):
+- NEON: N 0.70 / 0.71 / 0.77; LMA 0.77 / 0.77 / 0.84; lignin 0.59 / 0.62 /
+  0.77; cellulose 0.38 / 0.45 / 0.61.
+- `sierra_nf`: N 0.66 / 0.71 / 0.74; LMA 0.69 / 0.76 / 0.81; lignin 0.68 /
+  0.77 / 0.83; cellulose 0.51 / 0.58 / 0.64.
+
+Each 2025 sensor against the 2018 map (ρ, 10 components, raw;
+AVIRIS-C / AVIRIS-5):
+
+| Trait | NEON | `sierra_nf` |
+|---|---|---|
+| Nitrogen | 0.86 / 0.89 | 0.71 / 0.74 |
+| LMA | 0.90 / 0.92 | 0.73 / 0.78 |
+| Lignin | 0.61 / 0.66 | 0.54 / 0.55 |
+| Cellulose | 0.47 / 0.66 | 0.43 / 0.62 |
+
+**Level offsets** (median AVIRIS-5 − AVIRIS-C, in SD of the AVIRIS-C values):
+- *raw inputs:* 0.0–2.4 SD with 5 components; 4–9 SD with 10; 7–29 SD with
+  25 (N at `sierra_nf` −29 SD).
+- *matched inputs:* within 0.5 SD with 5 and 10 components; up to 1.9 SD
+  with 25.
+- The emulator turns the brighter AVIRIS-5 NIR and SWIR-1 into level
+  offsets that grow with model size.
+
+**Reading.**
+- **The reflectance and EWT bridge replicates at a second area.** Rank
+  agrees (EWT ρ 0.90–0.98, NDVI 0.93–0.96); level does not (AVIRIS-5
+  +9–13% EWT, +11–24% NIR/SWIR-1). Per-date standardization (§7) applies to
+  cross-sensor use too.
+- **Traits bridge in rank with a moderately sized retrieval.**
+  - With 10 components, AVIRIS-C and AVIRIS-5 agree at ρ 0.89–0.90 for N
+    and LMA at NEON, and 0.73–0.76 at `sierra_nf`. Lignin is 0.66–0.77 and
+    cellulose 0.57–0.68.
+  - That is within the range of the 2013 → 2018 stability of the AVIRIS-C
+    maps themselves (§7: ρ 0.65–0.90 for N, LMA and lignin).
+  - AVIRIS-5 tracks the 2018 map at least as well as 2025 AVIRIS-C does.
+- **The 25-component emulator does not bridge.** N agreement falls to ρ
+  0.28–0.39, and level offsets reach 17–29 SD.
+  - The extra components fit fine spectral features that differ between
+    the two processing chains: OE atmospheric correction for AVIRIS-5, and
+    the 2154 L2 for AVIRIS-C 2025, against the 2391 L2 the emulator was
+    trained on.
+  - Matching each band's level and gain does not fix this. It is a
+    spectral-shape difference, not a per-band calibration offset.
+- **Implication for carrying retrievals across sensors:**
+  - choose retrieval complexity by cross-sensor (or cross-date)
+    consistency, not only by in-sample fit;
+  - standardize per date;
+  - a 25-component emulator fitted to one processing chain is not
+    portable.
+- **Caveats:**
+  - emulated, not published, retrievals; the real 2403 coefficients may
+    behave differently;
+  - one day; five of eleven AVIRIS-5 scenes at `sierra_nf`;
+  - ρ is reported without bootstrap CIs;
+  - geometry (view and illumination differences between the two aircraft
+    lines), atmospheric correction and calibration cannot be separated
+    here.
+
+**Not run** (planned, stopped at a pause request):
+- block-bootstrap CIs on the trait ρ;
+- choosing the component count by cross-validated cross-sensor agreement;
+- the remaining ten traits (only N, LMA, lignin and cellulose were
+  compared);
+- adding the other six `sierra_nf` AVIRIS-5 scenes;
+- caching the 2025 30 m mosaics, so that variants need not re-read the
+  AVIRIS-C lines;
+- repeating the trait bridge with the real 2403 coefficients, if they are
+  shared.
+
+### 27. Does substrate explain the Tahoe-box directions? (`hls_results/trait_directions_substrate/`)
+
+§9 and §22 ruled out calibration, forest type, signal strength, mortality
+agent, host and drought timing as reasons why residual N and LMA track NDMI
+recovery in the Yosemite box but not in the Tahoe box. A remaining candidate
+is substrate. The northern Sierra carries Tertiary andesitic volcanic and
+mudflow deposits, while the Yosemite box is mostly batholith granite. Soil
+parent material could change how foliar N and LMA relate to growth and
+recovery.
+
+**Data** (`fetch_geology.py`):
+- USGS State Geologic Map Compilation (SGMC), California polygons
+  (`https://mrdata.usgs.gov/geology/state/shp/CA.zip`). These carry the
+  1:750,000 Geologic Map of California units.
+- The generalized lithology is grouped into granitic, volcanic,
+  metamorphic, surficial (mainly Quaternary glacial deposits) and other,
+  and rasterized onto the 30 m grids (`env/<aoi>_geology.nc`).
+- At this scale, units smaller than about a kilometre are generalized.
+
+| Substrate (share of AOI) | NEON | `sierra_nf` | Tahoe box |
+|---|---|---|---|
+| Granitic (Mesozoic granodiorite/quartz monzonite, Sierra Nevada batholith) | 82% | 87% | 69% |
+| Volcanic | 0% | 3% (Tertiary flows, Mesozoic metavolcanics) | **28%** (Tertiary andesitic pyroclastic and mudflow deposits) |
+| Metamorphic | 9% | 4% | 1% |
+| Surficial (glacial) | 7% | 4% | 1% |
+
+All three AOIs share the same granitic unit, so the boxes can be compared
+on the same substrate.
+
+**Method.**
+- `proto_trait_directions.py --group substrate`: the cells' dominant
+  substrate (≥ 50% of the cell's pixels).
+- Residual traits, strata and block-bootstrap CIs as in §22, for groups of
+  ≥ 1,000 cells.
+- A ladder Env+S | Env+S+G | Env+S+T | Env+S+G+T for NDMI recovery, with G
+  the substrate fractions, and the trait gain within each substrate.
+
+**Residual traits vs NDMI recovery** (within-stratum ρ, 95% CI):
+
+| AOI, substrate (cells) | N | LMA | Lignin | Cellulose |
+|---|---|---|---|---|
+| NEON, all (43,301) | +0.19 [0.16, 0.21] | −0.17 [−0.20, −0.14] | −0.17 [−0.19, −0.14] | −0.15 [−0.18, −0.13] |
+| NEON, granitic (36,491) | +0.19 [0.16, 0.22] | −0.16 [−0.19, −0.13] | −0.16 [−0.20, −0.13] | −0.16 [−0.19, −0.13] |
+| NEON, metamorphic (3,572) | +0.15 [0.07, 0.24] | −0.23 [−0.31, −0.16] | −0.26 [−0.32, −0.17] | −0.23 [−0.28, −0.13] |
+| NEON, surficial (3,215) | +0.21 [0.14, 0.28] | −0.29 [−0.35, −0.22] | −0.16 [−0.23, −0.09] | −0.02 (n.s.) |
+| `sierra_nf`, all (58,264) | +0.21 [0.20, 0.23] | −0.19 [−0.21, −0.17] | −0.18 [−0.20, −0.17] | −0.16 [−0.18, −0.15] |
+| `sierra_nf`, granitic (51,464) | +0.21 [0.19, 0.23] | −0.18 [−0.20, −0.16] | −0.18 [−0.20, −0.16] | −0.17 [−0.19, −0.15] |
+| `sierra_nf`, **volcanic** (2,653) | **+0.25** [0.18, 0.33] | **−0.29** [−0.36, −0.23] | −0.24 [−0.31, −0.18] | −0.05 (n.s.) |
+| `sierra_nf`, metamorphic (2,030) | +0.26 [0.18, 0.34] | −0.23 [−0.33, −0.14] | −0.21 [−0.29, −0.12] | −0.11 [−0.20, −0.04] |
+| `sierra_nf`, surficial (2,045) | +0.20 [0.13, 0.26] | −0.25 [−0.34, −0.15] | −0.22 [−0.30, −0.11] | −0.05 (n.s.) |
+| Tahoe box, all (55,105) | +0.02 [0.00, 0.05] | +0.02 (n.s.) | −0.11 [−0.13, −0.09] | −0.12 [−0.14, −0.10] |
+| Tahoe box, **granitic** (35,689) | **+0.02** (n.s.) | **+0.03** [0.00, 0.06] | −0.09 [−0.11, −0.07] | −0.10 [−0.12, −0.07] |
+| Tahoe box, volcanic (17,804) | +0.04 [0.01, 0.08] | −0.01 (n.s.) | −0.16 [−0.19, −0.12] | −0.15 [−0.18, −0.11] |
+
+NIRv recovery gives the same picture. In the Tahoe box, N is −0.05 and LMA
++0.10 on granitic cells, and 0.00 and +0.04 on volcanic cells.
+
+**Ladder** (NDMI recovery, ΔR² with 95% CI):
+
+| AOI | +G over Env+S | +T over Env+S | +T over Env+S+G | +T within granitic | +T within volcanic |
+|---|---|---|---|---|---|
+| NEON | +0.003 [0.001, 0.005] | +0.059 | +0.058 | +0.061 | – |
+| `sierra_nf` | +0.001 (n.s.) | +0.086 | +0.085 | +0.085 | +0.114 [0.081, 0.150] |
+| Tahoe box | +0.008 (n.s.) | +0.032 | +0.025 | +0.036 [0.023, 0.054] | +0.002 [−0.023, 0.024] |
+
+**Reading.**
+- **Substrate does not explain the difference.**
+  - On the *same* granitic unit, residual N and LMA track recovery in the
+    Yosemite box (N +0.19 to +0.21, LMA −0.16 to −0.18) and not in the Tahoe
+    box (N +0.02, LMA +0.03).
+  - The Yosemite-box volcanic cells (`sierra_nf`, 2,653) show the direction
+    at least as strongly as its granitic cells.
+  - Volcanic substrate therefore neither removes the direction where it
+    exists nor accounts for its absence in the Tahoe box.
+- **Structural carbon holds on every substrate in both boxes**, and in the
+  Tahoe box it is strongest on volcanic cells (lignin −0.16, cellulose
+  −0.15).
+- **Substrate adds almost nothing to Env+S** (≤ +0.008) and leaves the
+  trait gain nearly unchanged.
+  - The one substrate contrast is in the Tahoe box: the trait gain for NDMI
+    recovery is +0.036 on granitic cells and about 0 on volcanic cells.
+  - So on Tahoe volcanic substrate, traits add no recovery skill beyond
+    Env+S, even though the structural-carbon direction is present there.
+- With §9 and §22, every stand and site attribute tested so far (forest
+  type, mortality agent, host, drought timing, substrate) leaves the
+  Yosemite/Tahoe N–LMA contrast intact. What remains is a property of the
+  box as a whole: species mixes below the resolution of LANDFIRE and ADS,
+  or retrieval behaviour specific to the Tahoe acquisitions.
+- **Caveat:** at 1:750,000 the map generalizes small volcanic caps and
+  contacts. A finer test would use SSURGO parent material.
+
 ## Summary
 
 1. **Coverage.**
@@ -1407,6 +1969,39 @@ Tahoe cells whose EWT minimum fell in 2014 (not significant).
       timing group.
     - In the Yosemite box the direction holds in all of them.
     - Structural carbon holds everywhere.
+15. **Without lidar or local airborne training, spaceborne-like VSWIR beats
+    one Landsat scene but not a multi-date Landsat block** (§23, NEON and
+    `sierra_nf`).
+    - NDMI recovery over Env+S: EMIT-like +0.009 / +0.012 and 30 m +0.012
+      to +0.024 over the single scene. Against June + Jul–Sep composites
+      EMIT-like ties at both areas; the low-noise 30 m configuration is
+      ahead only at `sierra_nf` (+0.009). Native AVIRIS is ahead at both
+      (+0.007, +0.019).
+    - The no-lidar stack keeps 88–95% of the lidar-plus-AVIRIS reference
+      whatever the inputs; multi-date Landsat keeps as much as EMIT-like.
+      Only the low-noise 30 m configuration stays ahead of it (+0.015 to
+      +0.022).
+16. **The structural-carbon direction is the VSWIR-specific part of the
+    trait signal** (§24). At both areas spaceborne-like spectra keep the
+    lignin and cellulose directions, also beyond the Landsat bands, while
+    Landsat-emulated cellulose has none. The extra recovery skill on top
+    of Landsat is VSWIR-specific at NEON only. Leaf economics adds nothing
+    beyond multi-date Landsat.
+17. **Transferred VSWIR retrievals do not hold up better than transferred
+    Landsat proxies** (§25), with 25- or 10-component emulators. Losses
+    in recovery skill are alike, or larger for VSWIR (`sierra_nf` 2018).
+    In the Tahoe box and in 2018 an untrained multi-date Landsat block
+    matches or beats transferred VSWIR (by up to +0.043). VSWIR keeps
+    higher map agreement after transfer, which does not become recovery
+    skill. 10 components fix the 25-component collapse of transferred
+    native structural carbon in the Tahoe box.
+18. **The AVIRIS-5 bridge replicates at `sierra_nf`** (EWT ρ 0.90, AVIRIS-5
+    +9%) **and extends to traits** with a 10-component retrieval (N and LMA
+    ρ 0.73–0.90), not with a 25-component one (N 0.28–0.39) (§26).
+19. **Substrate does not explain the Tahoe-box leaf-economics gap** (§27).
+    On the same granitic unit, N and LMA track recovery in the Yosemite box
+    and not in the Tahoe box; Yosemite-box volcanic cells keep the
+    direction. Structural carbon holds on every substrate.
 
 ## Code
 
@@ -1420,11 +2015,13 @@ Tahoe cells whose EWT minimum fell in 2014 (not significant).
 `fetch_lidar_structure.py`, `proto_lidar_validation.py`,
 `proto_trait_stability.py`, `fetch_wdts_cwc.py`, `fetch_wdts_traits.py`
 (`--date`, `--suffix`), `fetch_forest_type.py`,
-`proto_trait_directions.py` (`--group`), `proto_forward_pilot.py`,
+`proto_trait_directions.py` (`--group`, incl. `substrate`), `proto_forward_pilot.py`,
 `proto_transfer_diagnostics.py`,
 `proto_structure_from_spectra.py`, `proto_trait_diversity.py`,
-`proto_spaceborne_sim.py` (`refl`, `simulate` with `--l8`/`--seed`,
-`compare`), `proto_aviris5_bridge.py`,
+`proto_spaceborne_sim.py` (`refl` with `--year`, `simulate` with
+`--l8`/`--seed`, `compare`), `proto_spaceborne_only.py` (`compare`,
+`carbon`), `proto_retrieval_transfer.py` (`emulate`, `score`),
+`proto_aviris5_bridge.py` (`--traits`, `--n-comp`), `fetch_geology.py`,
 `query_emit_coverage.py`. Run from `src/` in
 the `ecopro` env. Earth Engine uses the Cloud project `ecopro-509818`.
 `shap` is installed with pip. Run concurrent model jobs with

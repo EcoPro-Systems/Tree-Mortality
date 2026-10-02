@@ -19,17 +19,39 @@ nearest-nadir one is kept. On undisturbed forest 90 m cells covered by
 both: per-band bias, RMSE and Spearman ρ; NDVI, NDWI and EWT (the
 Beer-Lambert fit of fetch_wdts_cwc.py, each sensor on its own bands).
 
+Traits (--traits): the 2403 PLSR coefficients are not public, so one
+emulator per AOI (as in proto_spaceborne_sim.py: PLSR from log reflectance
+to the 2403 maps) is fitted on the June 2018 AVIRIS-C reflectance cache
+(wdts/sim/<aoi>_refl2018.nc, the most recent year with both spectra and a
+trait map; pixels from the line the map used) and applied unchanged to
+both 2025 mosaics, each interpolated onto the 2018 band centres (AVIRIS-5
+after convolution to the AVIRIS-C bands). Both 2025 inputs pass through
+the same emulator, so their agreement measures how consistently the two
+sensors support one retrieval, not the retrieval's accuracy. Two input
+variants: raw (each mosaic as delivered) and matched (each mosaic's per-
+band log reflectance rescaled to the mean and SD of the 2018 training
+pixels over its own valid forest pixels: a scene-level calibration that
+removes per-band level and gain offsets but keeps each sensor's spatial
+pattern). Emulators with 5, 10 and 25 PLSR components (--n-comp) test
+whether disagreement comes from fine spectral features that differ
+between the two processing chains. Reported per number of components,
+variant and trait on the same 90 m cells: Spearman ρ between sensors, the
+level offset (median AVIRIS-5 minus AVIRIS-C, in SD of the AVIRIS-C
+values), each sensor's ρ with the 2018 map, and the emulator's out-of-
+fold R² in 2018 (1 km blocks).
+
 Outputs in OUTPUTDIR: bands_<aoi>.csv, indices_<aoi>.csv,
-cells_<aoi>.csv and bridge_<aoi>.png.
+cells_<aoi>.csv, bridge_<aoi>.png and (--traits) traits_<aoi>.csv.
 
     python proto_aviris5_bridge.py $E/hls_results/aviris5_bridge \
-        -a neon_soap_teak
+        -a neon_soap_teak -a sierra_nf --traits
 """
 import re
 import click
 import numpy as np
 import pandas as pd
 import requests
+import xarray as xr
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -41,17 +63,29 @@ from scipy.stats import spearmanr
 import response_common as rc
 from fetch_wdts_cwc import (WIN_980, get_range, parse_header, load_kw,
                             fit_ewt)
-from proto_spaceborne_sim import good_bands, srf_matrix
+from proto_spaceborne_sim import (SIM, N_COMP, MAX_TRAIN, good_bands,
+                                  srf_matrix, emulate)
 
 AVC_BASE = ('https://data.ornldaac.earthdata.nasa.gov/protected/aviris/'
             'AVIRIS-Classic_L2_Reflectance/data/')
 DATA = rc.E / 'aviris_bridge'
 LINES = {'neon_soap_teak': {'avc': ['f250717t01p00r08', 'f250717t01p00r09'],
                             'av5': ['AV520250717t171949_006',
-                                    'AV520250717t173810_002']}}
+                                    'AV520250717t173810_002']},
+         'sierra_nf': {'avc': ['f250717t01p00r09', 'f250717t01p00r10',
+                               'f250717t01p00r11', 'f250717t01p00r12',
+                               'f250717t01p00r13'],
+                       'av5': ['AV520250717t175725_004',
+                               'AV520250717t181601_004',
+                               'AV520250717t183638_003',
+                               'AV520250717t181601_005',
+                               'AV520250717t175725_003']}}
 KW = rc.E / 'wdts' / 'aux' / 'prospect_d_spectra.txt'
 ROWS = 64  # rows per range request
 VALID = (-0.05, 1.5)  # physical reflectance; outside is set to NaN
+TRAIN_YEAR = 2018
+FOCUS = ['Nitrogen', 'LMA', 'Lignin', 'Cellulose']
+VARIANTS = ['raw', 'matched']
 
 
 def warp_cube(cube, src_t, src_epsg, transform, shape, epsg):
@@ -136,14 +170,21 @@ def read_av5(line, transform, shape, epsg, chunk=48):
 
 
 def mosaic(parts):
-    """Nearest-nadir mosaic of [(cube, dist)]"""
-    best = np.full(parts[0][1].shape, np.inf)
-    mos = np.full(parts[0][0].shape, np.nan, np.float32)
-    for cube, dist in parts:
+    """Nearest-nadir mosaic of an iterable of (wl, fwhm, cube, dist) or
+    None, folded in one line at a time; returns (wl, fwhm, mosaic)"""
+    wl = fwhm = mos = best = None
+    for part in parts:
+        if part is None:
+            continue
+        w, f, cube, dist = part
+        if mos is None:
+            wl, fwhm = w, f
+            best = np.full(dist.shape, np.inf)
+            mos = np.full(cube.shape, np.nan, np.float32)
         take = np.isfinite(dist) & (dist < best) & np.isfinite(cube).any(0)
         mos[:, take] = cube[:, take]
         best[take] = dist[take]
-    return mos
+    return wl, fwhm, mos
 
 
 def indices(R, wl, kw_wl, kw):
@@ -154,26 +195,125 @@ def indices(R, wl, kw_wl, kw):
                 'ewt980': fit_ewt(R, wl, kw_wl, kw, WIN_980)}
 
 
+def interp_matrix(wl, ref):
+    """(len(ref), len(wl)) linear interpolation of spectra onto ref"""
+    W = np.zeros((len(ref), len(wl)))
+    for i, x in enumerate(ref):
+        j = np.searchsorted(wl, x)
+        j = min(max(j, 1), len(wl) - 1)
+        f = (x - wl[j - 1]) / (wl[j] - wl[j - 1])
+        W[i, j - 1], W[i, j] = 1 - f, f
+    return W
+
+
+def log_inputs(R, wl, ref):
+    """(n_pix, len(ref)) log reflectance of a cube interpolated from its
+    good bands onto ref (NaN where any good band is missing)"""
+    g = np.flatnonzero(good_bands(wl) & np.isfinite(R).any((1, 2)))
+    W = interp_matrix(wl[g], ref)
+    X = R[g].reshape(len(g), -1)
+    bad = ~np.isfinite(X).all(0)
+    X = (W @ np.where(np.isfinite(X), X, 0)).T
+    X = np.log(np.clip(X, 1e-3, None)).astype(np.float32)
+    X[bad] = np.nan
+    return X
+
+
+def trait_bridge(aoi, wl_c, C, Fc, valid, scale, n_comps):
+    """Emulators (one per number of PLSR components) fitted on the 2018
+    AVIRIS-C cache, applied to both 2025 mosaics; agreement on 90 m
+    cells"""
+    from scipy.stats import spearmanr
+    from sklearn.cross_decomposition import PLSRegression
+    from fetch_wdts_traits import TRAITS
+    shape = valid.shape
+    ds = xr.open_dataset(SIM / f'{aoi}_refl{TRAIN_YEAR}.nc')
+    wl = ds.wavelength.values
+    ref = wl[good_bands(wl)]
+    tr = xr.open_dataset(rc.E / 'wdts' / f'{aoi}_traits.nc') \
+        .sel(year=TRAIN_YEAR)
+    fid = tr.flight_id.values
+    Y = np.stack([tr[f'{t}_mean'].values for t in FOCUS], -1) \
+        .reshape(-1, len(FOCUS))
+    mask = (fid > 0) & (ds.source_line_run.values == fid)
+    Y[~mask.ravel()] = np.nan
+    X = log_inputs(ds.refl.values.astype(np.float32), wl, ref)
+    pix = np.flatnonzero(np.isfinite(X).all(1) & np.isfinite(Y).any(1))
+    rows_i, cols_i = np.indices(shape)
+    block = ((rows_i // 33) * 10000 + cols_i // 33).ravel()
+    rng = np.random.default_rng(0)
+    fit = rng.choice(pix, min(MAX_TRAIN, len(pix)), replace=False)
+    r2, models = {}, {}
+    for nc in n_comps:
+        oof = emulate(X[pix], Y[pix], block[pix], nc)
+        for j, t in enumerate(FOCUS):
+            ok = np.isfinite(Y[pix, j])
+            r2[(nc, t)] = rc.wr2(Y[pix, j][ok], oof[ok, j])
+            okf = fit[np.isfinite(Y[fit, j])]
+            models[(nc, t)] = PLSRegression(
+                n_components=min(nc, len(ref)), scale=True).fit(
+                X[okf], Y[okf, j])
+    mu_t, sd_t = X[fit].mean(0), X[fit].std(0)
+    del X
+    layers = {}
+    for name, R in (('avc', C), ('av5', Fc)):
+        Xs = log_inputs(R, wl_c, ref)
+        ok = np.isfinite(Xs).all(1)
+        on = ok & valid.ravel()
+        mu_s, sd_s = Xs[on].mean(0), Xs[on].std(0)
+        for v in VARIANTS:
+            Xv = Xs[ok] if v == 'raw' else \
+                (Xs[ok] - mu_s) / sd_s * sd_t + mu_t
+            for (nc, t), m in models.items():
+                p = np.full(Xs.shape[0], np.nan, np.float32)
+                p[ok] = m.predict(Xv).ravel()
+                layers[f'{name}_{v}_{nc}_{t}'] = p.reshape(shape)
+    for j, t in enumerate(FOCUS):
+        layers[f'map_{t}'] = Y[:, j].reshape(shape)
+    d = rc.cell_table(layers, valid, scale)
+    rows = []
+    for nc, v, t in ((nc, v, t) for nc in n_comps for v in VARIANTS
+                     for t in FOCUS):
+        c, f = d[f'avc_{v}_{nc}_{t}'], d[f'av5_{v}_{nc}_{t}']
+        m = d[f'map_{t}']
+        ok = c.notna() & f.notna()
+        okm = ok & m.notna()
+        rows.append(dict(aoi=aoi, n_comp=nc, inputs=v, trait=t,
+                         n=int(ok.sum()), emulator_r2_2018=r2[(nc, t)],
+                         rho=spearmanr(c[ok], f[ok])[0],
+                         r=np.corrcoef(c[ok], f[ok])[0, 1],
+                         avc_median=c[ok].median(), av5_median=f[ok].median(),
+                         offset_sd=(f - c)[ok].median() / c[ok].std(),
+                         rho_avc_map2018=spearmanr(c[okm], m[okm])[0],
+                         rho_av5_map2018=spearmanr(f[okm], m[okm])[0]))
+        x = rows[-1]
+        click.echo(f'  {nc:2d} comp {v:7s} {t:10s} emulator R² {x["emulator_r2_2018"]:.2f}  '
+                   f'AVIRIS-C vs AVIRIS-5 ρ {x["rho"]:.3f}  offset '
+                   f'{x["offset_sd"]:+.2f} SD  ρ with 2018 map '
+                   f'{x["rho_avc_map2018"]:.2f} / {x["rho_av5_map2018"]:.2f}')
+    return pd.DataFrame(rows)
+
+
 @click.command()
 @click.argument('outputdir', type=click.Path(path_type=Path))
 @click.option('-a', '--aoi', 'aois', multiple=True,
               default=['neon_soap_teak'], show_default=True)
 @click.option('--scale', default=3, show_default=True)
-def main(outputdir, aois, scale):
+@click.option('--traits', is_flag=True,
+              help='Also compare emulated traits (fitted on the 2018 cache)')
+@click.option('--n-comp', 'n_comps', multiple=True, type=int,
+              default=[5, 10, N_COMP], show_default=True,
+              help='PLSR components of the trait emulator (repeatable)')
+def main(outputdir, aois, scale, traits, n_comps):
     outputdir.mkdir(parents=True, exist_ok=True)
     sess = requests.Session()
     kw_wl, kw = load_kw(KW)
     for aoi in aois:
         transform, shape, epsg = rc.aoi_info(aoi)
-        avc = [read_avc(sess, ln, transform, shape, epsg)
-               for ln in LINES[aoi]['avc']]
-        avc = [x for x in avc if x is not None]
-        av5 = [read_av5(ln, transform, shape, epsg)
-               for ln in LINES[aoi]['av5']]
-        wl_c, fw_c = avc[0][0], avc[0][1]
-        wl_5, fw_5 = av5[0][0], av5[0][1]
-        C = mosaic([(x[2], x[3]) for x in avc])
-        F = mosaic([(x[2], x[3]) for x in av5])
+        wl_c, fw_c, C = mosaic(read_avc(sess, ln, transform, shape, epsg)
+                               for ln in LINES[aoi]['avc'])
+        wl_5, fw_5, F = mosaic(read_av5(ln, transform, shape, epsg)
+                               for ln in LINES[aoi]['av5'])
         good_c = good_bands(wl_c)
         W, keep = srf_matrix(wl_5, good_bands(wl_5), wl_c, fw_c)
         F5 = F.reshape(F.shape[0], -1)
@@ -182,6 +322,7 @@ def main(outputdir, aois, scale):
         conv = (W @ Fg).reshape((-1,) + shape)
         conv[:, ~np.isfinite(F[W.sum(0) > 0]).all(0)] = np.nan
         Fc[keep] = conv
+        del F5, Fg, conv
         Fc[~good_c] = np.nan
         C[~good_c] = np.nan
 
@@ -237,6 +378,10 @@ def main(outputdir, aois, scale):
                    f'diff| {vis.median_rel_diff.abs().median():.3f}, median '
                    f'ρ {vis.rho.median():.3f}')
         fig_bridge(bt, d, aoi, outputdir / f'bridge_{aoi}.png')
+        if traits:
+            del F
+            trait_bridge(aoi, wl_c, C, Fc, valid, scale, n_comps).to_csv(
+                outputdir / f'traits_{aoi}.csv', index=False)
 
 
 def fig_bridge(bt, d, aoi, path):

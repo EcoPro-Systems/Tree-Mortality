@@ -47,6 +47,15 @@ proto_response_traits.py:
                            year is 2016, the Yosemite box's 2014)
                  ewt_min   the year of the cell's minimum June EWT,
                            2014-16 (Tahoe box 2015, Yosemite box 2016)
+                 substrate dominant bedrock substrate (>= 50% of the
+                           cell's pixels; else mixed) from the USGS
+                           State Geologic Map Compilation
+                           (fetch_geology.py): granitic, volcanic,
+                           metamorphic, surficial. Also a ladder
+                           Env+S | Env+S+G | Env+S+T | Env+S+G+T for
+                           NDMI recovery with G the substrate fractions,
+                           and the trait gain within each substrate
+                           (ladder_substrate.csv)
 
 Residual traits are cross-fitted on Env+S over all cells (as in
 proto_response_traits.py), and ρ is averaged within aridity-tercile x
@@ -75,13 +84,15 @@ from proto_response_metrics import ENV, S_WALL
 from proto_response_traits import (TRAITS, ELEV_BAND, build, trait_paths,
                                    trait_year)
 from fetch_forest_type import FTYPES
+from fetch_geology import SUBSTRATES
 
 TARGETS = ['ndmi_recovery', 'nirv_recovery', 'ndmi_resistance']
 FOCUS = ['Nitrogen', 'LMA', 'Lignin', 'Cellulose']
 YOSEMITE = ('neon_soap_teak', 'sierra_nf')
 VARIANTS = ['baseline', 'nov2', 'year2014', 'year2015', 'line_z']
 MIN_GROUP = 1000  # cells for a forest-type subset
-GROUPS = ['agent', 'host', 'cwd_late', 'ewt_min']
+GROUPS = ['agent', 'host', 'cwd_late', 'ewt_min', 'substrate']
+G_SUB = [f'G_{s}' for s in SUBSTRATES[:4]]
 ADS_YEARS = (2014, 2015, 2016, 2017)
 MIN_MAPPED = 0.25  # share of a cell's pixels with mapped mortality
 AGENTS = {'fir engraver': 'fir_engraver', 'mountain pine beetle':
@@ -164,6 +175,9 @@ def group_table(aoi, k):
     ew = xr.open_dataset(cwc)
     for y in (2014, 2015, 2016):
         layers[f'ewt_{y}'] = ew.ewt980.sel(year=y).values.astype(np.float32)
+    geo = xr.open_dataset(rc.E / 'env' / f'{aoi}_geology.nc').substrate.values
+    for i, n in enumerate(SUBSTRATES[:4]):
+        layers[f'G_{n}'] = (geo == i).astype(np.float32)
     t = rc.cell_table(layers, valid, k)
     for label, classes in (('agent', AGENTS), ('host', HOSTS)):
         t[label] = dominant(t, sorted(set(classes.values())), label)
@@ -175,7 +189,10 @@ def group_table(aoi, k):
     t['ewt_min'] = np.where(E3.notna().all(1),
                             (E3.fillna(np.inf).values.argmin(1) + 2014)
                             .astype(str), 'na')
-    return t[['cell_row', 'cell_col'] + GROUPS]
+    G = t[G_SUB].values
+    t['substrate'] = np.where(G.max(1) >= 0.5,
+                              np.array(SUBSTRATES[:4])[G.argmax(1)], 'mixed')
+    return t[['cell_row', 'cell_col'] + GROUPS + G_SUB]
 
 
 def residual_traits(d):
@@ -329,6 +346,35 @@ def ftype_ladder(d, n_boot, aoi, scale_m):
     return rows
 
 
+def substrate_ladder(d, n_boot, aoi, scale_m, t='ndmi_recovery'):
+    """Does substrate add to Env+S, and does it change the trait gain?
+    Also the trait gain within each substrate"""
+    rows = []
+    y0 = trait_year(d)
+    T = [f'T_{x}_{y0}' for x in TRAITS] + [f'T_qcfc_{y0}']
+    es = ENV + S_WALL
+    sub = d[d[t].notna() & np.isfinite(d[t])]
+    fs = {'Env+S': es, 'Env+S+G': es + G_SUB, 'Env+S+T': es + T,
+          'Env+S+G+T': es + G_SUB + T}
+    r, _ = rc.ladder(sub, t, fs, 'block1000', n_boot=n_boot,
+                     pairs=[('Env+S', 'Env+S+G'), ('Env+S', 'Env+S+T'),
+                            ('Env+S+G', 'Env+S+G+T')])
+    rows += [dict(x, aoi=aoi, scale_m=scale_m, group='all') for x in r]
+    for g in SUBSTRATES[:4] + ['mixed']:
+        s = sub[sub.substrate == g]
+        if len(s) < MIN_GROUP:
+            continue
+        r, _ = rc.ladder(s, t, {'Env+S': es, 'Env+S+T': es + T},
+                         'block1000', n_boot=n_boot)
+        rows += [dict(x, aoi=aoi, scale_m=scale_m, group=g) for x in r]
+    for x in rows:
+        if x['compare'] and x['boot_blocks'] == 'block1000':
+            click.echo(f'  ladder {t} {x["group"]:11s} {x["features"]} - '
+                       f'{x["compare"]}: {x["r2"]:+.3f} [{x["lo"]:+.3f},'
+                       f'{x["hi"]:+.3f}] n={x["n"]}')
+    return rows
+
+
 def save(rows, path):
     if rows:
         pd.DataFrame(rows).to_csv(path, index=False)
@@ -349,13 +395,13 @@ def save(rows, path):
 @click.option('--n-boot', default=500, show_default=True)
 @click.option('--skip-ladder', is_flag=True)
 @click.option('--group', 'groups', multiple=True, type=click.Choice(GROUPS),
-              help='Directions within ADS agent/host or drought-timing '
-                   'groups (baseline variant)')
+              help='Directions within ADS agent/host, drought-timing or '
+                   'substrate groups (baseline variant)')
 def main(outputdir, aois, variants, response_dirs, dynamics_dir, scale,
          n_boot, skip_ladder, groups):
     outputdir.mkdir(parents=True, exist_ok=True)
     scale_m = rc.RES * scale
-    rows, lad, sig, grows = [], [], [], []
+    rows, lad, sig, grows, glad = [], [], [], [], []
     ratios = {}
     for aoi in aois:
         rdir = next(rc.E / 'hls_results' / r for r in response_dirs
@@ -401,6 +447,9 @@ def main(outputdir, aois, variants, response_dirs, dynamics_dir, scale,
                     click.echo(f'  {g}: ' + ', '.join(
                         f'{k} {n}' for k, n in dg[g].value_counts().items()))
                 save(grows, outputdir / 'groups.csv')
+                if 'substrate' in groups:
+                    glad += substrate_ladder(dg, n_boot, aoi, scale_m)
+                    save(glad, outputdir / 'ladder_substrate.csv')
             if v == 'baseline' and ft is not None and not skip_ladder:
                 lad += ftype_ladder(d, n_boot, aoi, scale_m)
                 save(lad, outputdir / 'ladder_ftype.csv')

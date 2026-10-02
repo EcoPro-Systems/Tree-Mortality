@@ -6,12 +6,15 @@ noise)?
 
 Steps (subcommands):
 
-  refl      Read the 2013 primary-date WDTS AVIRIS-C corrected reflectance
-            (ORNL DAAC 2391) with all bands over the AOI, aggregate 15 m to
-            the 30 m AOI grid and cache wdts/sim/<aoi>_refl2013.nc. Each
-            pixel takes the line the 2403 trait mosaic used there
-            (flight_id is the line's run number), else the nearest-nadir
-            line, so that spectra and trait maps share the view geometry.
+  refl      Read the primary-date WDTS AVIRIS-C corrected reflectance of
+            a year (--year, default 2013; ORNL DAAC 2391) with all bands
+            over the AOI, aggregate 15 m to the 30 m AOI grid and cache
+            wdts/sim/<aoi>_refl<year>.nc. Each pixel takes the line the
+            2403 trait mosaic used there (flight_id is the line's run
+            number), else the nearest-nadir line, so that spectra and trait
+            maps share the view geometry. Lines in another UTM zone than
+            the AOI are skipped (source_line_run records each pixel's
+            line, so pixels off the trait mosaic's line can be dropped).
   simulate  For each sensor configuration, degrade the spectra, retrieve
             traits with an emulator and EWT with the Beer-Lambert fit, and
             write wdts/sim/<aoi>_{traits,cwc}_<config>.nc in the layout of
@@ -160,16 +163,18 @@ def cli():
 @click.option('-a', '--aoi', 'name', default='neon_soap_teak',
               show_default=True)
 @click.option('-j', '--jobs', default=8, show_default=True)
-def refl(name, jobs):
-    """Cache the 2013 reflectance mosaic on the 30 m AOI grid"""
+@click.option('--year', default=YEAR, show_default=True)
+def refl(name, jobs, year):
+    """Cache one year's reflectance mosaic on the 30 m AOI grid"""
     transform, shape, epsg = rc.aoi_info(name)
     SIM.mkdir(parents=True, exist_ok=True)
     sess = session()
-    dates = DATES[BOX[name]][YEAR]
+    dates = DATES[BOX[name]][year]
     fid = xr.open_dataset(rc.E / 'wdts' / f'{name}_traits.nc').flight_id \
-        .sel(year=YEAR).values
+        .sel(year=year).values
     mos, best, wl, names = None, np.full(shape, np.inf), None, []
     src = np.full(shape, -1, np.int16)
+    run = np.full(shape, -1, np.int16)
     for rank, date in enumerate(dates):
         for h in find_lines(sess, date):
             if h['zone'] != epsg - 32600:
@@ -191,24 +196,27 @@ def refl(name, jobs):
             mos[:, take] = cube[:, take]
             best[take] = score[take]
             src[take] = len(names)
+            run[take] = h['run'] if rank == 0 else -1
             names.append(h['name'])
             click.echo(f'[{name}] {h["name"]}: {take.sum()} px '
                        f'({time.time() - t:.0f} s)')
     xs = transform.c + (np.arange(shape[1]) + 0.5) * transform.a
     ys = transform.f + (np.arange(shape[0]) + 0.5) * transform.e
     ds = xr.Dataset({'refl': (('wavelength', 'y', 'x'), mos),
-                     'source_line': (('y', 'x'), src)},
+                     'source_line': (('y', 'x'), src),
+                     'source_line_run': (('y', 'x'), run)},
                     coords={'wavelength': wl, 'y': ys, 'x': xs},
                     attrs={'crs': f'EPSG:{epsg}',
                            'transform': list(transform)[:6],
                            'source': 'doi:10.3334/ORNLDAAC/2391',
                            'lines': ','.join(names)})
-    out = SIM / f'{name}_refl{YEAR}.nc'
+    out = SIM / f'{name}_refl{year}.nc'
     ds.to_netcdf(out.with_suffix('.tmp.nc'),
                  encoding={'refl': {'zlib': True, 'dtype': 'int16',
                                     'scale_factor': 1e-4,
                                     '_FillValue': -32768},
-                           'source_line': {'zlib': True}})
+                           'source_line': {'zlib': True},
+                           'source_line_run': {'zlib': True}})
     os.replace(out.with_suffix('.tmp.nc'), out)
     click.echo(f'wrote {out}')
 
