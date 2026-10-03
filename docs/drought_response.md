@@ -2278,8 +2278,18 @@ The Aug 22 run reproduces §29 exactly (T18 beyond Env+S+Leg+L1, NDMI
 recovery: +0.000 / +0.009). The Jul 5 run, on 24,290 / 20,048 cells (20 / 31
 more than the Aug 22 run, which loses a few cloudy ones), gives **+0.014**
 [0.006, 0.024] / **+0.012** for the same contrast, with Env+S R² 0.569
-against 0.595 at NEON. That is the fold-assignment effect above, and it means
-§29's "+0.000 at NEON" depends on the fold assignment.
+against 0.595 at NEON. That is the fold-assignment effect above. Rerunning the
+Aug 22 control on the §29 cells with blocks shuffled into folds
+(`proto_forward_pilot.py --fold-seed`, three seeds):
+
+| ΔR², NEON / `sierra_nf` | default folds (§29) | seed 1 | seed 2 | seed 3 |
+|---|---|---|---|---|
+| NDMI recovery, T18 beyond Env+S+Leg+L1 | +0.000 / **+0.009** | **+0.010** / **+0.016** | **+0.011** / **+0.008** | **+0.013** / **+0.008** |
+| NDMI recovery, T18 − Aug 22 | −0.004 / +0.005 | +0.005 / **+0.012** | +0.001 / +0.003 | +0.007 [0.000, 0.015] / +0.002 |
+| NIRv recovery, T18 beyond Env+S+Leg+L1 | **+0.015** / **+0.021** | **+0.013** / **+0.018** | **+0.017** / **+0.021** | **+0.015** / **+0.016** |
+| NDMI resistance, T18 − Aug 22 | **−0.014** / **−0.026** | **−0.023** / **−0.023** | **−0.017** / **−0.027** | **−0.017** / **−0.028** |
+
+§29's +0.000 at NEON is the outlier among four fold assignments.
 
 **Reading.**
 - **In the first drought, a VSWIR series adds more to a Landsat series than
@@ -2304,8 +2314,11 @@ against 0.595 at NEON. That is the fold-assignment effect above, and it means
   NIRv recovery at `sierra_nf`); against the composites the traits add for
   every NIRv response at both areas.
 - **§29's NEON headline is fold-sensitive:** T18 beyond Env+S+Leg+L1 for
-  NDMI recovery is +0.000 on the Aug 22 cells and +0.014 on the Jul 5 cells
-  (`sierra_nf` +0.009 / +0.012).
+  NDMI recovery is +0.000 with §29's folds and +0.010 to +0.013 under three
+  shuffled fold assignments (+0.014 on the Jul 5 cells); `sierra_nf` +0.008
+  to +0.016. So beyond one June 2018 Landsat scene the 2018 traits add about
+  +0.01 for cycle-2 NDMI recovery at both areas, but no more than a second
+  scene does.
 - **Caveats:** emulated retrievals; the 2013 VSWIR dates span May–June
   while L′ reaches August; the 2018 leg is one area; fold-assignment
   variability of ±0.006 (and up to 0.014 for the cycle-2 contrast) on top
@@ -2563,9 +2576,10 @@ Tuning changes cycle-2 Env+S by −0.003 to +0.007.
       recovery in every case.
 21. **For cycle-2 NDMI recovery one June 2018 Landsat scene matches the 2018
     AVIRIS traits** (§29). Beyond Env+S, legacy and the scene, the traits
-    add +0.000 (NEON) and +0.009 (`sierra_nf`). For NIRv recovery and
-    resistance they add +0.007 to +0.021. The N, LMA, lignin and cellulose
-    directions survive the Landsat bands at about half strength.
+    add +0.000 (NEON) and +0.009 (`sierra_nf`); under three shuffled fold
+    assignments +0.010 to +0.013 and +0.008 to +0.016 (§31). For NIRv
+    recovery and resistance they add +0.007 to +0.021. The N, LMA, lignin and
+    cellulose directions survive the Landsat bands at about half strength.
 22. **The Tahoe-box leaf-economics gap is not a retrieval effect** (§30). A
     Yosemite-trained retrieval applied to Tahoe spectra gives N and LMA no
     direction, while the same transfer between NEON and `sierra_nf` keeps
@@ -2576,8 +2590,9 @@ Tuning changes cycle-2 Env+S by −0.003 to +0.007.
     of six Landsat dates, under every fold assignment tried. In 2018 (NEON)
     two more Landsat dates match or beat it (EMIT-like −0.003 to −0.013).
     On top of the denser Landsat series VSWIR still adds. In cycle 2 a second
-    Landsat scene matches the 2018 traits for NDMI responses; fold assignment
-    moves these contrasts by up to ±0.006 (0.014 for §29's NEON contrast).
+    Landsat scene matches the 2018 traits for NDMI responses. Fold assignment
+    moves these contrasts by up to ±0.006, and §29's NEON +0.000 by up to
+    +0.013.
 24. **The recovery shortfall is information, not model capacity** (§32).
     Tuned boosting adds ≤ +0.016 to Env+S for NDMI recovery, an MLP does
     worse, every trait and residual-trait gain survives under every learner

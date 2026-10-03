@@ -235,8 +235,12 @@ def landsat_control(d, aoi, k, scenes, composites, n_boot, dir_boot):
               help='Bootstrap draws for the direction CIs')
 @click.option('--tag', default='', help='Suffix of the Landsat-control '
                                         'output files')
+@click.option('--fold-seed', type=int,
+              help='Shuffle 1 km blocks into folds with this seed (default: '
+                   'the deterministic GroupKFold assignment)')
 def main(outputdir, aois, scale, rank, n_boot, scenes, landsat_composites,
-         dir_boot, tag):
+         dir_boot, tag, fold_seed):
+    rc.FOLD_SEED = fold_seed
     outputdir.mkdir(parents=True, exist_ok=True)
     scale_m = rc.RES * scale
     std = 'rank' if rank else 'z'
@@ -245,7 +249,8 @@ def main(outputdir, aois, scale, rank, n_boot, scenes, landsat_composites,
         lrows, drows = [], []
         for aoi in aois:
             d, _ = build(aoi, scale, rank)
-            tags = dict(aoi=aoi, scale_m=scale_m, standardize=std)
+            tags = dict(aoi=aoi, scale_m=scale_m, standardize=std,
+                        fold_seed=fold_seed)
             r, dr = landsat_control(d, aoi, scale, list(scenes),
                                     landsat_composites, n_boot, dir_boot)
             lrows += [dict(x, **tags) for x in r]
