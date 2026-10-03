@@ -28,7 +28,7 @@ analysed the same way.
 | AVIRIS flight-line inventory | `aviris_locator/AVIRIS-{C,NG}_flight_{table.csv,s.geojson}` | [ORNL DAAC 2140](https://doi.org/10.3334/ORNLDAAC/2140) flight tables (to Aug 2024) |
 | WDTS traits and canopy water | `wdts/<aoi>_traits.nc`, `wdts/<aoi>_cwc.nc` | As before. `fetch_wdts_cwc.py` now also saves `nadir_dist`. `stanislaus` traits (Tahoe box, UTM 11) are warped onto the UTM 10 AOI grid with nearest neighbour; no canopy water there yet |
 | Geology | `env/<aoi>_geology.nc`; source in `geology/` | From `fetch_geology.py`: USGS State Geologic Map Compilation, California (1:750,000), grouped into granitic, volcanic, metamorphic, surficial and other on the 30 m grids |
-| Reflectance caches for emulated retrievals | `wdts/sim/<aoi>_refl<year>.nc`, `wdts/sim/<aoi>_refl_<yymmdd>_<product>.nc`, `wdts/sim/<aoi>_l8_<date>.nc` | From `proto_spaceborne_sim.py refl` (2013; 2018 for NEON and `sierra_nf`; 2013 for `stanislaus`), `proto_spaceborne_ts.py refl` (NEON and `sierra_nf`: 2013-05-03 and 2013-06-26 from ORNL DAAC 2391; 2018-06-22 and 2018-08-28 from ORNL DAAC 2154) and `fetch_landsat_c2_ee.py --scene` (2013-05-04, 05-20, 06-05, 06-21, 07-07; 2013-06-12 and 06-28 Tahoe; 2018-06-19, 08-22, 09-07) |
+| Reflectance caches for emulated retrievals | `wdts/sim/<aoi>_refl<year>.nc`, `wdts/sim/<aoi>_refl_<yymmdd>_<product>.nc`, `wdts/sim/<aoi>_l8_<date>.nc` | From `proto_spaceborne_sim.py refl` (2013; 2018 for NEON and `sierra_nf`; 2013 for `stanislaus`), `proto_spaceborne_ts.py refl` (NEON and `sierra_nf`: 2013-05-03 and 2013-06-26 from ORNL DAAC 2391; 2018-06-22 and 2018-08-28 from ORNL DAAC 2154) and `fetch_landsat_c2_ee.py --scene` (2013-05-04, 05-20, 06-05, 06-21, 07-07, 07-23 (no clear pixels), 08-08; 2013-06-12 and 06-28 Tahoe; 2018-06-19, 07-05, 07-21, 08-06, 08-22, 09-07) |
 | Airborne lidar structure | `lidar/<aoi>_lidar.nc`; raw in `lidar/aso/`, `lidar/lvis2008/` | From `fetch_lidar_structure.py`: ASO 2014–17 composite (Ferraz et al. 2020) and LVIS Sep 2008 footprints on the 30 m grids. Coverage and sources: `lidar_coverage.md` |
 
 ## Airborne imaging spectroscopy over the study boxes, 2018–2025 (`hls_results/airborne_coverage/`)
@@ -2169,6 +2169,270 @@ Bold, and every structural-carbon entry: the CI excludes 0.
 - **Caveats:** emulated retrievals; the Tahoe 2013 lines lack the 1323 and
   1333 nm bands; one acquisition per box.
 
+### 31. Do VSWIR dates add more to a Landsat series than as many extra Landsat dates? (`hls_results/spaceborne_ts/`, `hls_results/forward_pilot_landsat/`)
+
+In §28, a VSWIR time series added +0.009 to +0.045 for NDMI recovery on top
+of the matched Landsat series. That model also has twice as many dates as
+the Landsat series alone, so any extra dates might add as much. This section
+adds the same number of further Landsat dates instead (L′) and compares the
+two additions on the same cells and folds.
+
+**Data.** Further Landsat 8 path-42 scenes (`fetch_landsat_c2_ee.py
+--scene`), as many as the VSWIR dates:
+
+| | L (as in §28) | L′ (extra dates) |
+|---|---|---|
+| 2013, nearest set | May 4, Jun 5, Jun 21 | May 20, Jul 7, Aug 8 |
+| 2013, all-clear set | May 20, Jun 21, Jul 7 | May 4, Jun 5, Aug 8 |
+| 2018, NEON | Jun 19, Aug 22 | Jul 5, Sep 7 |
+
+- Jul 23 2013 has no clear pixels over either AOI after masking, so Aug 8
+  (NEON 98% clear, `sierra_nf` 81%) takes its place. That puts one L′ date
+  six weeks after the last VSWIR date (Jun 26); a later-season view favours
+  Landsat.
+- Jul 21 and Aug 6 2018 are 49–88% clear (Ferguson Fire smoke), so the 2018
+  L′ uses Jul 5 and Sep 7 (≥ 97%).
+- The two 2013 runs use the same six dates, split differently between L
+  and L′, on the same cells (NEON 28,664, `sierra_nf` 39,750; fewer than in
+  §28 because Aug 8 is only 81% clear at `sierra_nf`).
+
+**Method** (`proto_spaceborne_ts.py compare --landsat-extra`). L′ is built
+like L: each scene's bands, NDVI, NDMI, NBR and NIRv, plus its own last −
+first change. The emulated VSWIR blocks are those of §28. Over Env+S, no
+lidar, paired (1 km block bootstrap, 5 km as a check):
+- **L+V − L+L′** (balanced: the same number of dates added to the same L);
+- L+L′ − L and L+V − L (what each addition buys on its own);
+- L+V − L+l8multi (against the year's June and Jul–Sep composites);
+- L+L′+V − L+L′ (does VSWIR still add on top of the denser series?).
+
+**2013, NDMI recovery** (NEON Env+S 0.682, `sierra_nf` 0.520; bold where
+the 95% CI excludes 0):
+
+| ΔR², NEON / `sierra_nf` | nearest set as L | all-clear set as L |
+|---|---|---|
+| L+L′ − L | **+0.023** / **+0.011** | **+0.014** / **+0.010** |
+| L+V − L, native | **+0.046** / **+0.030** | **+0.034** / **+0.027** |
+| L+V − L, emit | **+0.035** / **+0.024** | **+0.024** / **+0.023** |
+| L+V − L, sbg_lo | **+0.043** / **+0.023** | **+0.030** / **+0.021** |
+| **L+V − L+L′, native** | **+0.023** / **+0.019** | **+0.021** / **+0.017** |
+| **L+V − L+L′, emit** | **+0.012** [0.005, 0.019] / **+0.013** [0.007, 0.018] | **+0.011** [0.005, 0.016] / **+0.013** [0.008, 0.018] |
+| **L+V − L+L′, sbg_lo** | **+0.020** / **+0.012** | **+0.017** / **+0.011** |
+| L+V − L+l8multi, emit / sbg_lo | **+0.023** / **+0.031** (NEON); **+0.015** / **+0.015** (`sierra_nf`) | **+0.016** / **+0.022**; **+0.014** / **+0.012** |
+| L+L′+V − L+L′, emit / sbg_lo | **+0.025** / **+0.030**; **+0.021** / **+0.020** | **+0.017** / **+0.022**; **+0.018** / **+0.016** |
+
+- With 5 km blocks every L+V − L+L′ entry keeps its sign. The NEON emit
+  entries widen to [0.000, 0.024] (nearest) and [0.001, 0.022] (all-clear);
+  every other entry still excludes 0.
+- **NIRv recovery**, L+V − L+L′: NEON nearest +0.007 for every
+  configuration (n.s.), all-clear **+0.011** to **+0.013**; `sierra_nf`
+  **+0.006** to **+0.008** with either set (emit and sbg_lo lower bounds at
+  0.000–0.001). L+L′+V − L+L′ is **+0.012** to **+0.019** everywhere.
+
+**2018, NEON** (cycle-2 responses; 22,628 pilot cells; Env+S 0.603):
+
+| ΔR² | NDMI recovery | NIRv recovery |
+|---|---|---|
+| L+L′ − L | **+0.016** | **+0.034** |
+| L+V − L, native / emit / sbg_lo | **+0.020** / +0.008 (n.s.) / +0.006 (n.s.) | **+0.023** / **+0.012** / **+0.015** |
+| **L+V − L+L′, native** | +0.004 [−0.008, 0.015] | **−0.011** |
+| **L+V − L+L′, emit** | **−0.008** [−0.016, −0.000] | **−0.022** |
+| **L+V − L+L′, sbg_lo** | **−0.010** [−0.022, −0.001] | **−0.019** |
+| L+V − L+l8multi, native / emit / sbg_lo | **+0.020** / **+0.008** / +0.006 (n.s.) | **+0.021** / **+0.010** / **+0.013** |
+| L+L′+V − L+L′, native / emit / sbg_lo | **+0.013** / **+0.009** / +0.006 [0.000, 0.013] | **+0.011** / +0.002 (n.s.) / **+0.005** |
+
+The 2018 composites add nothing to L (−0.000 / +0.002), while two more
+scenes add +0.016 / +0.034.
+
+**Fold-assignment sensitivity** (`--fold-seed`). The block bootstrap holds
+the CV folds fixed. Dropping 21 of §28's 22,649 cells for the extra dates
+moved the 2018 Env+S R² from 0.596 to 0.603 and emit L+V − L from +0.014 to
++0.008, because GroupKFold's size-balanced assignment of blocks to folds
+changes. So the key contrasts were rerun with blocks shuffled into folds
+under three seeds (NDMI recovery, NEON):
+
+| L+V − L+L′ | default folds | seed 1 | seed 2 | seed 3 |
+|---|---|---|---|---|
+| 2013 (nearest set), emit | **+0.012** | **+0.012** | **+0.015** | **+0.011** |
+| 2018, emit | **−0.008** | −0.003 | −0.006 | **−0.013** |
+| 2018, sbg_lo | **−0.010** | −0.005 | **−0.008** | **−0.016** |
+
+Fold assignment moves these contrasts by up to ±0.006, more than the
+bootstrap CIs suggest.
+
+**Cycle-2 analogue** (`proto_forward_pilot.py --landsat 20180619 --landsat
+<second scene> --landsat-composites`, the §29 cells): the 2018 traits (T18)
+against one more Landsat scene (L2: the second scene and the change) or the
+composites (LM), each added beyond Env+S+Leg+L1. Second scene Aug 22 (as in
+§29) or Jul 5 (the next clear path-42 date after Jun 19).
+
+| ΔR², NEON / `sierra_nf` | T18 − Aug 22 | T18 − Jul 5 | T18 − composites (Aug 22 cells) |
+|---|---|---|---|
+| NDMI resistance | **−0.014** / **−0.026** | −0.003 / +0.000 | +0.000 / −0.006 |
+| NDMI recovery | −0.004 / +0.005 (n.s.) | +0.010 [−0.001, 0.024] / −0.003 | −0.000 / **+0.011** |
+| NDMI resilience | +0.000 / **−0.007** | +0.000 / **−0.008** | +0.004 / −0.001 |
+| NIRv resistance | −0.005 / +0.002 (n.s.) | **+0.004** / +0.004 | **+0.005** / **+0.011** |
+| NIRv recovery | +0.002 / **+0.007** | **+0.007** / **−0.009** | **+0.010** / **+0.022** |
+| NIRv resilience | +0.002 / **+0.015** | +0.001 / +0.005 | **+0.008** / **+0.022** |
+
+The Aug 22 run reproduces §29 exactly (T18 beyond Env+S+Leg+L1, NDMI
+recovery: +0.000 / +0.009). The Jul 5 run, on 24,290 / 20,048 cells (20 / 31
+more than the Aug 22 run, which loses a few cloudy ones), gives **+0.014**
+[0.006, 0.024] / **+0.012** for the same contrast, with Env+S R² 0.569
+against 0.595 at NEON. That is the fold-assignment effect above, and it means
+§29's "+0.000 at NEON" depends on the fold assignment.
+
+**Reading.**
+- **In the first drought, a VSWIR series adds more to a Landsat series than
+  as many extra Landsat dates do.** For NDMI recovery this holds at both
+  areas, with either split of the six Landsat dates, for every
+  configuration (emit +0.011 to +0.013, sbg_lo +0.011 to +0.020), and
+  under every fold assignment tried. The extra dates include a later-season
+  view that the VSWIR series lacks. For NIRv recovery the margin is smaller
+  (+0.006 to +0.013) and not significant at NEON with the nearest set.
+- **In 2018 it does not hold.** At NEON two more Landsat dates match or beat
+  the spaceborne-like VSWIR series (emit −0.003 to −0.013, sbg_lo −0.005 to
+  −0.016 across fold assignments; NIRv recovery −0.019 to −0.022). Native
+  AVIRIS ties. The 2018 caveats of §28 apply: weaker emulators on
+  uncorrected spectra, and Landsat inputs in the responses' baseline years.
+- **VSWIR is not redundant with a denser Landsat series:** on top of L+L′
+  it still adds +0.016 to +0.032 (2013) and up to +0.013 (2018) for NDMI
+  recovery.
+- **Cycle 2, one scene each:** a second Landsat scene matches the 2018
+  traits for every NDMI response (or beats them: NDMI resistance with Aug
+  22, resilience at `sierra_nf`). For the NIRv responses the result depends
+  on the second scene's date (the traits beat Aug 22 and trail Jul 5 for
+  NIRv recovery at `sierra_nf`); against the composites the traits add for
+  every NIRv response at both areas.
+- **§29's NEON headline is fold-sensitive:** T18 beyond Env+S+Leg+L1 for
+  NDMI recovery is +0.000 on the Aug 22 cells and +0.014 on the Jul 5 cells
+  (`sierra_nf` +0.009 / +0.012).
+- **Caveats:** emulated retrievals; the 2013 VSWIR dates span May–June
+  while L′ reaches August; the 2018 leg is one area; fold-assignment
+  variability of ±0.006 (and up to 0.014 for the cycle-2 contrast) on top
+  of the bootstrap CIs.
+
+### 32. Does a more flexible model close the gap or absorb the trait gain? (`hls_results/model_capacity/`)
+
+Every R² gain so far comes from one untuned gradient-boosting model
+(`response_common.hgb`: 300 iterations, learning rate 0.05). This section
+asks whether a more flexible learner gets the same skill from climate,
+terrain and structure alone, absorbs the trait gain, or makes the
+cross-drought transfer work.
+
+**Learners** (`response_common.make_model`):
+- **hgb**, the default model of every other section;
+- **hgb_tuned**, gradient boosting with leaves (15, 63), minimum leaf size
+  (20, 100) and the number of iterations (≤ 500 at learning rate 0.1) chosen
+  on an inner split holding out 20% of the training fold's 1 km blocks,
+  then refit on the whole training fold;
+- **mlp**, a multilayer perceptron (256-128-64, adam) on standardized,
+  median-imputed inputs with missing-value indicators and a standardized
+  target, early-stopped on the same kind of inner block split.
+
+Deep tabular models (TabPFN, FT-Transformer) are not tested: the `ecopro`
+env has no torch. So this tests model capacity on these inputs, not deep
+learning in general.
+
+**Method** (`proto_model_capacity.py`). Each feature set is fitted with every
+learner inside one ladder (`<set>|<learner>`), so every difference, within a
+learner or between learners, is paired on the same cells, 1 km folds and
+bootstrap draws (5 km as a check). Residual traits (Tres) are cross-fitted
+with hgb, as in the other sections, for every learner.
+- `within`: cycle 1 (§2), Env+S | Env+S+T | Env+S+Tres; with `--structure
+  aso`, Env+S | Env+S+L | Env+S+L+T | Env+S+L+Tres on the ASO cells (§5).
+  NDMI recovery and stress response.
+- `transfer`: environment-only models fitted on cycle 1 and applied to cycle
+  2 (§4, §21), pooled and within elevation quartiles.
+- `forward`: within cycle 2 (§11), Env+S | +Leg | +T18 | +Leg+T18.
+
+hgb reproduces the earlier numbers: +0.065 / +0.089 for Env+S+T (§2),
++0.038 / +0.025 for Tres over ASO (§5), +0.035 / +0.019 for T18 beyond Leg
+(§11).
+
+**Cycle 1, no lidar** (NEON 44,079 cells, `sierra_nf` 58,676; stress
+response 36,646 / 55,511). ΔR², bold where the 95% CI excludes 0:
+
+| NEON / `sierra_nf` | hgb | hgb_tuned | mlp |
+|---|---|---|---|
+| NDMI recovery, Env+S R² | 0.683 / 0.529 | 0.693 / 0.544 | 0.664 / 0.502 |
+| Env+S, − hgb | – | **+0.010** / **+0.016** | **−0.019** / **−0.027** |
+| +T | **+0.065** / **+0.089** | **+0.070** / **+0.091** | **+0.076** / **+0.110** |
+| +Tres | **+0.046** / **+0.070** | **+0.052** / **+0.072** | **+0.052** / **+0.076** |
+| Env+S+T\|hgb − Env+S of this learner | – | **+0.055** / **+0.073** | **+0.084** / **+0.115** |
+| Env+S+Tres\|hgb − Env+S of this learner | – | **+0.036** / **+0.054** | **+0.065** / **+0.097** |
+| Stress response, Env+S R² | 0.705 / 0.490 | 0.719 / 0.528 | 0.692 / 0.460 |
+| Env+S, − hgb | – | **+0.013** / **+0.038** | **−0.014** / **−0.030** |
+| +T | **+0.022** / **+0.055** | **+0.029** / **+0.068** | **+0.029** / **+0.091** |
+| +Tres | **+0.014** / **+0.042** | **+0.017** / **+0.052** | +0.005 / **+0.057** |
+| Env+S+T\|hgb − Env+S of this learner | – | **+0.009** / **+0.017** | **+0.036** / **+0.085** |
+| Env+S+Tres\|hgb − Env+S of this learner | – | +0.001 / +0.004 | **+0.028** / **+0.072** |
+
+**Cycle 1, over ASO lidar** (NEON 29,004 cells, `sierra_nf` 48,731; gains over
+Env+S+L):
+
+| NEON / `sierra_nf` | hgb | hgb_tuned | mlp |
+|---|---|---|---|
+| NDMI recovery, Env+S+L − hgb | – | **+0.012** / **+0.020** | **−0.031** / −0.007 |
+| +T | **+0.056** / **+0.037** | **+0.059** / **+0.038** | **+0.066** / **+0.043** |
+| +Tres | **+0.038** / **+0.025** | **+0.041** / **+0.027** | **+0.035** / **+0.012** |
+| Env+S+L+Tres\|hgb − Env+S+L of this learner | – | **+0.027** / +0.005 | **+0.070** / **+0.032** |
+| Stress response, Env+S+L − hgb | – | **+0.010** / **+0.040** | −0.003 / +0.001 |
+| +T | **+0.033** / **+0.035** | **+0.043** / **+0.043** | **+0.052** / **+0.045** |
+| +Tres | **+0.024** / **+0.021** | **+0.037** / **+0.031** | **+0.025** / +0.011 [−0.000, 0.022] |
+| Env+S+L+Tres\|hgb − Env+S+L of this learner | – | **+0.014** / **−0.019** | **+0.027** / **+0.020** |
+
+**Cross-drought transfer** (environment only, cycle 1 → cycle 2; NEON 24,342
+cells, `sierra_nf` 20,089; pooled R² and Spearman ρ):
+
+| NEON / `sierra_nf` | hgb | hgb_tuned | mlp |
+|---|---|---|---|
+| NDMI recovery R² | −0.42 / −2.68 | −0.45 / −3.06 | −4.70 / −13.9 |
+| NDMI recovery ρ | +0.22 / −0.07 | +0.24 / −0.08 | −0.34 / −0.38 |
+| NIRv recovery ρ | +0.41 / −0.22 | +0.44 / −0.26 | +0.41 / −0.38 |
+| NDMI resilience ρ | −0.39 / −0.36 | −0.33 / −0.37 | −0.29 / −0.55 |
+| NDMI recovery ρ within elevation quartiles | +0.15, −0.14, +0.26, +0.27 / +0.18, +0.17, +0.19, +0.29 | +0.16, −0.17, +0.25, +0.31 / +0.21, +0.19, +0.16, +0.28 | −0.01, −0.20, +0.16, +0.16 / −0.24, +0.18, −0.05, −0.01 |
+
+**Within cycle 2** (§11 cells). Leg and T18 gains are much the same under
+every learner:
+
+| NEON / `sierra_nf` | hgb | hgb_tuned | mlp |
+|---|---|---|---|
+| NDMI recovery, Env+S − hgb | – | +0.001 / −0.003 | **−0.056** / **−0.060** |
+| +Leg | **+0.063** / **+0.151** | **+0.066** / **+0.160** | **+0.084** / **+0.162** |
+| +T18 | **+0.065** / **+0.105** | **+0.064** / **+0.115** | **+0.082** / **+0.133** |
+| +T18 beyond Leg | **+0.035** / **+0.019** | **+0.029** / **+0.020** | **+0.031** / **+0.032** |
+| NIRv recovery, +T18 beyond Leg | **+0.032** / **+0.028** | **+0.039** / **+0.030** | **+0.033** / **+0.033** |
+| NDMI resilience, +T18 beyond Leg | **+0.018** / **+0.015** | **+0.030** / **+0.020** | **+0.037** / **+0.018** |
+
+Tuning changes cycle-2 Env+S by −0.003 to +0.007.
+
+**Reading.**
+- **For recovery the shortfall is missing information, not model
+  capacity.**
+  - Tuned boosting lifts Env+S by only +0.010 / +0.016 for NDMI recovery
+    (≤ 0.02), and by nothing in cycle 2.
+  - The MLP is worse than the default model everywhere.
+  - Every trait and residual-trait gain excludes 0 under every learner, at
+    both areas, without and with lidar. Traits on the default model still
+    beat the tuned learner without them (+0.055 / +0.073; residual traits
+    +0.036 / +0.054).
+  - No learner makes the environment-only transfer work: level fails, the
+    resilience ranking reverses, and the `sierra_nf` recovery ranking stays
+    near 0 pooled with the same within-elevation skill (§21).
+- **For stress response a better learner does help, at `sierra_nf`.**
+  Tuning adds +0.038 to Env+S (+0.040 over lidar), and there the residual
+  traits on the default model no longer beat the tuned learner without them
+  (+0.004 without lidar; −0.019 over lidar). Within the tuned learner the
+  trait gains are larger (+Tres +0.052 / +0.031 over lidar), so the gain
+  survives; stress-response gains should be quoted with the tuned learner.
+- **The MLP** gives the largest trait gains (+T), because it extracts least
+  from Env+S. Its residual-trait gains are weakest: n.s. for NEON stress
+  response and borderline over lidar at `sierra_nf`, but it is the weakest
+  learner on every response.
+- **Caveats:** a small tuning grid; one inner split per fold; Tres
+  residualized with hgb for every learner; no deep tabular models; two runs
+  ran concurrently, which affects timing, not results.
+
 ## Summary
 
 1. **Coverage.**
@@ -2306,6 +2570,20 @@ Bold, and every structural-carbon entry: the CI excludes 0.
     Yosemite-trained retrieval applied to Tahoe spectra gives N and LMA no
     direction, while the same transfer between NEON and `sierra_nf` keeps
     it. Structural carbon holds with every retrieval.
+23. **In the first drought, a VSWIR series adds more to a Landsat series
+    than as many extra Landsat dates do** (§31). For NDMI recovery: EMIT-like
+    +0.011 to +0.013, 30 m +0.011 to +0.020, at both areas, with either split
+    of six Landsat dates, under every fold assignment tried. In 2018 (NEON)
+    two more Landsat dates match or beat it (EMIT-like −0.003 to −0.013).
+    On top of the denser Landsat series VSWIR still adds. In cycle 2 a second
+    Landsat scene matches the 2018 traits for NDMI responses; fold assignment
+    moves these contrasts by up to ±0.006 (0.014 for §29's NEON contrast).
+24. **The recovery shortfall is information, not model capacity** (§32).
+    Tuned boosting adds ≤ +0.016 to Env+S for NDMI recovery, an MLP does
+    worse, every trait and residual-trait gain survives under every learner
+    (with and without lidar), and no learner makes the cross-drought
+    transfer work. For stress response at `sierra_nf` tuning adds +0.038,
+    and the trait gains are larger within the tuned learner.
 
 ## Code
 
@@ -2320,12 +2598,15 @@ Bold, and every structural-carbon entry: the CI excludes 0.
 `proto_trait_stability.py`, `fetch_wdts_cwc.py`, `fetch_wdts_traits.py`
 (`--date`, `--suffix`), `fetch_forest_type.py`,
 `proto_trait_directions.py` (`--group`, incl. `substrate`; `--trait-cells`/`--trait-source`),
-`proto_forward_pilot.py` (`--landsat`, `--landsat-composites`),
+`proto_forward_pilot.py` (`--landsat`, `--landsat-composites`, `--tag`),
 `proto_transfer_diagnostics.py`,
 `proto_structure_from_spectra.py`, `proto_trait_diversity.py`,
 `proto_spaceborne_sim.py` (`refl` with `--year`, `simulate` with
 `--l8`/`--seed`, `compare`), `proto_spaceborne_only.py` (`compare`,
-`carbon`), `proto_spaceborne_ts.py` (`refl`, `emulate`, `compare`), `proto_retrieval_transfer.py` (`emulate`, `score`),
+`carbon`), `proto_spaceborne_ts.py` (`refl`, `emulate`, `compare` with `--landsat-extra` and `--fold-seed`),
+`proto_retrieval_transfer.py` (`emulate`, `score`),
+`proto_model_capacity.py` (`within`, `transfer`, `forward`; learners in
+`response_common.make_model`),
 `proto_aviris5_bridge.py` (`--traits`, `--n-comp`), `fetch_geology.py`,
 `query_emit_coverage.py`. Run from `src/` in
 the `ecopro` env. Earth Engine uses the Cloud project `ecopro-509818`.

@@ -57,6 +57,12 @@ Subcommands:
             dates against full-season composites: unbalanced, deployment
             context only); the maps beyond Landsat (L+M1 - L, L1+M1 - L1).
             Cells with every date on both sides (and both composites).
+            --landsat-extra adds as many further Landsat 8 scenes (Lx, with
+            their own change) and the balanced add-on contrasts: does the
+            VSWIR series add more to L than as many extra Landsat dates do
+            (L+V:<c> - L+Lx)? Also L+Lx - L, L+V:<c> - L+l8multi (against
+            full-season composites) and L+Lx+V:<c> - L+Lx (VSWIR on top of
+            the denser Landsat series).
             --structure adds the no-lidar stack of proto_spaceborne_only.py
             (2013 leg) with each time series as the trait block.
 
@@ -78,6 +84,10 @@ processing and baseline years with them.
     python proto_spaceborne_ts.py compare $E/hls_results/spaceborne_ts \\
         -a neon_soap_teak --leg 2013 --landsat 20130605 \\
         --landsat 20130504 --landsat 20130621
+    python proto_spaceborne_ts.py compare $E/hls_results/spaceborne_ts \\
+        -a neon_soap_teak --leg 2013 --landsat 20130605 \\
+        --landsat 20130504 --landsat 20130621 --landsat-extra 20130520 \\
+        --landsat-extra 20130707 --landsat-extra 20130723 --tag _extra
 """
 import os
 import re
@@ -490,18 +500,19 @@ def leg_table(aoi, year, scale):
 
 
 def timeseries_table(outputdir, aoi, leg, year, scale, scenes, configs,
-                     only=()):
+                     only=(), extra=()):
     d, es, valid = leg_table(aoi, year, scale)
     cells = pd.read_csv(outputdir / f'cells_{aoi}_{leg}.csv.gz')
     cells = cells.drop(columns=[c for c in cells
                                 if c.startswith(('n_px', 'block'))])
     d = d.merge(cells, on=KEYS, how='inner')
-    for s in scenes:
-        t = landsat_block(aoi, valid, scale, 'l8raw', s)
-        t = t.rename(columns={f'l8raw:{v}': f'l8@{s}:{v}'
-                              for v in LANDSAT_VARS})
-        d = d.merge(t[KEYS + [f'l8@{s}:{v}' for v in LANDSAT_VARS]],
-                    on=KEYS, how='left')
+    for p, ss in (('l8', scenes), ('l8x', extra)):
+        for s in ss:
+            t = landsat_block(aoi, valid, scale, 'l8raw', s)
+            t = t.rename(columns={f'l8raw:{v}': f'{p}@{s}:{v}'
+                                  for v in LANDSAT_VARS})
+            d = d.merge(t[KEYS + [f'{p}@{s}:{v}' for v in LANDSAT_VARS]],
+                        on=KEYS, how='left')
     t = landsat_block(aoi, valid, scale, 'l8multi', None, year)
     multi = [c for c in t if c.startswith('l8multi:')]
     d = d.merge(t[KEYS + multi], on=KEYS, how='left')
@@ -526,6 +537,13 @@ def timeseries_table(outputdir, aoi, leg, year, scale, scenes, configs,
     cols['L'] = [f'l8@{s}:{v}' for s in scenes + ['chg']
                  for v in LANDSAT_VARS]
     cols['L1'] = [f'l8@{scenes[0]}:{v}' for v in LANDSAT_VARS]
+    if extra:
+        x_lo, x_hi = min(extra), max(extra)
+        for v in LANDSAT_VARS:
+            d[f'l8x@chg:{v}'] = d[f'l8x@{x_hi}:{v}'] - d[f'l8x@{x_lo}:{v}']
+        cols['Lx'] = [f'l8x@{s}:{v}' for s in list(extra) + ['chg']
+                      for v in LANDSAT_VARS]
+        need += [f'l8x@{s}:nir' for s in extra]
     cols['l8multi'] = multi
     cols['M1'] = [f'maps:{x}' for x in TRAITS]
     need += [f'l8@{s}:nir' for s in scenes] + ['l8multi:nir_jun',
@@ -533,7 +551,9 @@ def timeseries_table(outputdir, aoi, leg, year, scale, scenes, configs,
     n0 = len(d)
     d = d[d[need].notna().all(1)].copy()
     click.echo(f'[{aoi}] {len(d)} of {n0} cells with every date '
-               f'(VSWIR {", ".join(labels)}; Landsat {", ".join(scenes)})')
+               f'(VSWIR {", ".join(labels)}; Landsat {", ".join(scenes)}'
+               + (f'; extra Landsat {", ".join(extra)}' if extra else '')
+               + ')')
     return d, es, cols, labels
 
 
@@ -547,11 +567,21 @@ def ts_ladder(d, es, cols, configs, targets, n_boot):
         fs[f'L+V:{c}'] = es + cols['L'] + cols[f'V:{c}']
     fs['L+M1'] = es + cols['L'] + cols['M1']
     fs['L1+M1'] = es + cols['L1'] + cols['M1']
+    if 'Lx' in cols:
+        fs['L+Lx'] = es + cols['L'] + cols['Lx']
+        fs['L+l8multi'] = es + cols['L'] + cols['l8multi']
+        for c in configs:
+            fs[f'L+Lx+V:{c}'] = es + cols['L'] + cols['Lx'] + cols[f'V:{c}']
     pairs = [('Env+S', k) for k in fs if k != 'Env+S']
     for c in configs:
         pairs += [('L', f'V:{c}'), ('L', f'L+V:{c}'), ('L1', f'V1:{c}'),
                   (f'V1:{c}', f'V:{c}'), ('l8multi', f'V:{c}')]
     pairs += [('L1', 'L'), ('L', 'L+M1'), ('L1', 'L1+M1')]
+    if 'Lx' in cols:
+        pairs += [('L', 'L+Lx'), ('L', 'L+l8multi')]
+        for c in configs:
+            pairs += [('L+Lx', f'L+V:{c}'), ('L+l8multi', f'L+V:{c}'),
+                      ('L+Lx', f'L+Lx+V:{c}')]
     rows = []
     for t in targets:
         sub = d[d[t].notna() & np.isfinite(d[t])]
@@ -582,6 +612,9 @@ def ts_ladder(d, es, cols, configs, targets, n_boot):
 @click.option('--landsat', 'scenes', multiple=True, required=True,
               help='Landsat 8 scene dates (YYYYMMDD) matched to the VSWIR '
                    'dates, in the same order (the first is L1)')
+@click.option('--landsat-extra', 'extra', multiple=True,
+              help='Further Landsat 8 scene dates (YYYYMMDD) forming Lx, '
+                   'as many as the VSWIR dates')
 @click.option('--config', 'configs', multiple=True, default=CONFIGS,
               show_default=True)
 @click.option('--vswir-date', 'only', multiple=True,
@@ -593,18 +626,24 @@ def ts_ladder(d, es, cols, configs, targets, n_boot):
 @click.option('-t', '--target', 'targets', multiple=True)
 @click.option('--scale', default=3, show_default=True)
 @click.option('--n-boot', default=1000, show_default=True)
-def compare(outputdir, aois, leg, year, scenes, configs, only, sources,
-            tag, targets, scale, n_boot):
+@click.option('--fold-seed', type=int,
+              help='Shuffle 1 km blocks into folds with this seed (default: '
+                   'the deterministic GroupKFold assignment)')
+def compare(outputdir, aois, leg, year, scenes, extra, configs, only,
+            sources, tag, targets, scale, n_boot, fold_seed):
     """VSWIR time series vs the date-matched Landsat time series"""
+    rc.FOLD_SEED = fold_seed
     year = year or int(leg)
     targets = list(targets) or TARGETS[year]
     scenes = list(scenes)
     rows, stk = [], []
     for aoi in aois:
         d, es, cols, labels = timeseries_table(outputdir, aoi, leg, year,
-                                               scale, scenes, configs, only)
+                                               scale, scenes, configs, only,
+                                               extra)
         tags = dict(aoi=aoi, leg=leg, vswir=','.join(labels),
-                    landsat=','.join(scenes), scale_m=rc.RES * scale)
+                    landsat=','.join(scenes), landsat_extra=','.join(extra),
+                    fold_seed=fold_seed, scale_m=rc.RES * scale)
         click.echo(f'[{aoi}] over Env+S, no lidar')
         rows += [dict(x, **tags) for x in ts_ladder(d, es, cols, configs,
                                                      targets, n_boot)]

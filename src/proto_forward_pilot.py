@@ -40,12 +40,13 @@ composites. On the cells with every scene, paired:
     L1 vs T18 over Env+S and over Env+S+Leg (one date each)
     T18 beyond Env+S+L1, Env+S+Leg+L1, Env+S+Leg+L2 (and +LM)
     T18 vs T13 beyond Env+S+Leg+L1 (post- vs pre-drought traits)
+    T18 vs the second scene (or LM), each added beyond Env+S+Leg+L1
 and the within-stratum ρ (1 km block-bootstrap CIs) of N, LMA, lignin and
 cellulose residualized on Env+S and on Env+S+L1. The cycle-2 responses are
 Landsat 8/9 with a 2017-19 baseline, so a 2018 Landsat block shares
 sensor, processing and baseline years with them. Outputs landsat_<std>.csv
-and landsat_directions_<std>.csv; the runs without --landsat are
-unchanged.
+and landsat_directions_<std>.csv (--tag adds a suffix); the runs without
+--landsat are unchanged.
 
 Held-out AOIs (response_common.HELD_OUT) are refused.
 
@@ -172,8 +173,11 @@ def landsat_control(d, aoi, k, scenes, composites, n_boot, dir_boot):
         if b in lb:
             fs[f'Env+S+Leg+{b}'] = es + legall + lb[b]
             fs[f'Env+S+Leg+{b}+T18'] = es + legall + lb[b] + T18
+            # one more Landsat scene (or the composites) vs the 2018 traits,
+            # each beyond Env+S+Leg+L1
             pairs += [('Env+S+Leg+L1', f'Env+S+Leg+{b}'),
-                      (f'Env+S+Leg+{b}', f'Env+S+Leg+{b}+T18')]
+                      (f'Env+S+Leg+{b}', f'Env+S+Leg+{b}+T18'),
+                      (f'Env+S+Leg+{b}', 'Env+S+Leg+L1+T18')]
     rows, drows = [], []
     strata = (d.arid.astype(str) + '_' +
               (d.elevation // ELEV_BAND).astype(int).astype(str))
@@ -229,8 +233,10 @@ def landsat_control(d, aoi, k, scenes, composites, n_boot, dir_boot):
               help='Also the 2018 June and Jul-Sep Landsat 8 composites')
 @click.option('--dir-boot', default=500, show_default=True,
               help='Bootstrap draws for the direction CIs')
+@click.option('--tag', default='', help='Suffix of the Landsat-control '
+                                        'output files')
 def main(outputdir, aois, scale, rank, n_boot, scenes, landsat_composites,
-         dir_boot):
+         dir_boot, tag):
     outputdir.mkdir(parents=True, exist_ok=True)
     scale_m = rc.RES * scale
     std = 'rank' if rank else 'z'
@@ -244,10 +250,11 @@ def main(outputdir, aois, scale, rank, n_boot, scenes, landsat_composites,
                                     landsat_composites, n_boot, dir_boot)
             lrows += [dict(x, **tags) for x in r]
             drows += [dict(x, **tags) for x in dr]
-            pd.DataFrame(lrows).to_csv(outputdir / f'landsat_{std}.csv',
-                                       index=False)
+            pd.DataFrame(lrows).to_csv(
+                outputdir / f'landsat_{std}{tag}.csv', index=False)
             pd.DataFrame(drows).to_csv(
-                outputdir / f'landsat_directions_{std}.csv', index=False)
+                outputdir / f'landsat_directions_{std}{tag}.csv',
+                index=False)
         return
     for aoi in aois:
         d, c1 = build(aoi, scale, rank)

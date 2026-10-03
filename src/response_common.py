@@ -4,6 +4,7 @@ nested trait models, trait dynamics): AOI grids, cell tables at several
 scales, spatial-block CV with gradient boosting, paired block-bootstrap
 confidence intervals on R² differences, and residual semivariograms.
 """
+import copy
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -12,6 +13,7 @@ from scipy.optimize import curve_fit
 from scipy.stats import spearmanr
 from sklearn.model_selection import GroupKFold
 from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.neural_network import MLPRegressor
 
 from util import load_config
 from fetch_hls_aoi import aoi_grid
@@ -22,6 +24,10 @@ CONFIG = Path(__file__).resolve().parent.parent / 'config/hls_aois.yml'
 RES = 30
 N_SPLITS = 5
 MIN_VALID = 0.7  # fraction of 30 m pixels valid for a coarser cell
+# None: GroupKFold's deterministic, size-balanced assignment of blocks to
+# folds (every experiment so far); an int shuffles blocks into folds with
+# that seed (fold-assignment sensitivity checks)
+FOLD_SEED = None
 # AOIs held out for the 2020-22 drought: their cycle-2 responses stay
 # unexamined until models fixed on the other AOIs are applied to them
 HELD_OUT = {'stanislaus', 'seki'}
@@ -87,6 +93,125 @@ def hgb(seed=0):
                                          random_state=seed)
 
 
+def inner_split(n, groups, frac=0.2, seed=0):
+    """(train, validation) masks holding out about frac of the groups
+    (spatial blocks); a random split of rows without groups"""
+    rng = np.random.default_rng(seed)
+    if groups is None:
+        val = rng.random(n) < frac
+    else:
+        g = np.unique(groups)
+        val = np.isin(groups, rng.choice(g, max(1, int(round(frac * len(g)))),
+                                         replace=False))
+    return ~val, val
+
+
+class TunedHGB:
+    """Gradient boosting tuned on an inner block split: leaves and
+    minimum leaf size from a small grid, the number of iterations (up to
+    max_iter at learning rate 0.1) from staged predictions on the held-out
+    blocks; then refit on all training cells"""
+    GRID = [dict(max_leaf_nodes=nl, min_samples_leaf=ms)
+            for nl in (15, 63) for ms in (20, 100)]
+
+    def __init__(self, seed=0, max_iter=500, learning_rate=0.1):
+        self.seed, self.max_iter, self.lr = seed, max_iter, learning_rate
+
+    def _model(self, n_iter, **kw):
+        return HistGradientBoostingRegressor(
+            max_iter=n_iter, learning_rate=self.lr, early_stopping=False,
+            random_state=self.seed, **kw)
+
+    def fit(self, X, y, sample_weight=None, groups=None):
+        X, y = np.asarray(X, float), np.asarray(y, float)
+        w = None if sample_weight is None else np.asarray(sample_weight)
+        tr, va = inner_split(len(y), groups, seed=self.seed)
+        wv = None if w is None else w[va]
+        best = (np.inf, None, None)
+        for kw in self.GRID:
+            m = self._model(self.max_iter, **kw).fit(
+                X[tr], y[tr], sample_weight=None if w is None else w[tr])
+            for i, p in enumerate(m.staged_predict(X[va])):
+                mse = np.average((y[va] - p) ** 2, weights=wv)
+                if mse < best[0]:
+                    best = (mse, kw, i + 1)
+        self.params_ = dict(best[1], n_iter=best[2])
+        self.model_ = self._model(best[2], **best[1]).fit(
+            X, y, sample_weight=w)
+        return self
+
+    def predict(self, X):
+        return self.model_.predict(np.asarray(X, float))
+
+
+class BlockMLP:
+    """Multilayer perceptron on standardized inputs (median-imputed, with
+    missing-value indicators) and a standardized target; the number of
+    epochs is chosen by early stopping on an inner block split, and the
+    best epoch's weights are kept"""
+    def __init__(self, seed=0, hidden=(256, 128, 64), alpha=1e-3,
+                 batch_size=256, max_epochs=200, patience=10):
+        self.seed, self.hidden, self.alpha = seed, hidden, alpha
+        self.batch_size, self.max_epochs = batch_size, max_epochs
+        self.patience = patience
+
+    def _prep(self, X):
+        X = np.asarray(X, float)
+        miss = np.isnan(X[:, self.miss_cols_])
+        X = np.where(np.isnan(X), self.med_, X)
+        return np.column_stack([(X - self.mu_) / self.sd_, miss])
+
+    def fit(self, X, y, sample_weight=None, groups=None):
+        X, y = np.asarray(X, float), np.asarray(y, float)
+        self.miss_cols_ = np.flatnonzero(np.isnan(X).any(0))
+        self.med_ = np.nanmedian(X, 0)
+        Xi = np.where(np.isnan(X), self.med_, X)
+        self.mu_, self.sd_ = Xi.mean(0), Xi.std(0)
+        self.sd_[self.sd_ == 0] = 1
+        self.ymu_, self.ysd_ = y.mean(), y.std()
+        Z, t = self._prep(X), (y - self.ymu_) / self.ysd_
+        tr, va = inner_split(len(y), groups, seed=self.seed)
+        m = MLPRegressor(hidden_layer_sizes=self.hidden, alpha=self.alpha,
+                         batch_size=self.batch_size, random_state=self.seed)
+        best, best_m, wait = np.inf, None, 0
+        for epoch in range(self.max_epochs):
+            m.partial_fit(Z[tr], t[tr])
+            mse = np.mean((t[va] - m.predict(Z[va])) ** 2)
+            if mse < best - 1e-5:
+                best, best_m, wait = mse, copy.deepcopy(m), 0
+            else:
+                wait += 1
+                if wait >= self.patience:
+                    break
+        self.model_, self.n_epochs_ = best_m, epoch + 1 - wait
+        return self
+
+    def predict(self, X):
+        return self.model_.predict(self._prep(X)) * self.ysd_ + self.ymu_
+
+
+LEARNERS = ('hgb', 'hgb_tuned', 'mlp')
+
+
+def make_model(learner='hgb', seed=0):
+    """hgb: the default model of every experiment; hgb_tuned and mlp take
+    groups= (spatial blocks of the training cells) in fit"""
+    if learner == 'hgb':
+        return hgb(seed)
+    if learner == 'hgb_tuned':
+        return TunedHGB(seed)
+    if learner == 'mlp':
+        return BlockMLP(seed)
+    raise ValueError(f'unknown learner {learner}')
+
+
+def fit_model(learner, X, y, sample_weight=None, groups=None, seed=0):
+    m = make_model(learner, seed)
+    if learner == 'hgb':
+        return m.fit(X, y, sample_weight=sample_weight)
+    return m.fit(X, y, sample_weight=sample_weight, groups=groups)
+
+
 def wr2(y, p, w=None):
     w = np.ones(len(y)) if w is None else np.asarray(w)
     y, p = np.asarray(y), np.asarray(p)
@@ -95,23 +220,28 @@ def wr2(y, p, w=None):
 
 
 def oof_predict(df, cols, target, blocks, weight=None, seed=0,
-                n_splits=N_SPLITS, fold_features=None):
+                n_splits=N_SPLITS, fold_features=None, learner='hgb'):
     """Out-of-fold predictions with GroupKFold over spatial blocks.
 
     fold_features(df, train_mask) -> (n, k) array: extra features that
     must be recomputed in each fold from the training cells only (e.g.
-    neighbour_mean)."""
+    neighbour_mean). learner: see make_model; tuned learners split the
+    training blocks again for their own validation."""
     p = np.full(len(df), np.nan)
     X, y = df[cols].values, df[target].values
+    g = df[blocks].values
     w = None if weight is None else df[weight].values
-    for tr, te in GroupKFold(n_splits=n_splits).split(X, groups=df[blocks]):
+    kf = (GroupKFold(n_splits=n_splits) if FOLD_SEED is None else
+          GroupKFold(n_splits=n_splits, shuffle=True,
+                     random_state=FOLD_SEED))
+    for tr, te in kf.split(X, groups=g):
         Xf = X
         if fold_features is not None:
             train = np.zeros(len(df), bool)
             train[tr] = True
             Xf = np.column_stack([X, fold_features(df, train)])
-        m = hgb(seed)
-        m.fit(Xf[tr], y[tr], sample_weight=None if w is None else w[tr])
+        m = fit_model(learner, Xf[tr], y[tr],
+                      None if w is None else w[tr], g[tr], seed)
         p[te] = m.predict(Xf[te])
     return p
 
@@ -191,18 +321,22 @@ def bootstrap_r2(y, preds, blocks, w=None, n_boot=1000, seed=0,
 
 
 def ladder(df, target, fsets, blocks, weight=None, seed=0, n_boot=1000,
-           pairs=None, extra_blocks=(), fold_features=None):
+           pairs=None, extra_blocks=(), fold_features=None, learner='hgb'):
     """Fit each feature set, then R² with CIs and the R² gain of each step.
 
     fsets: ordered {name: [cols]}. pairs defaults to consecutive steps.
     extra_blocks: further block columns to bootstrap over (e.g. 5 km).
     fold_features: {name: callable} of per-fold features (oof_predict) for
     the named sets, which may then have no columns of their own.
+    learner: one learner for every set, or {name: learner} (default hgb).
     Returns (rows, preds)."""
     d = df[df[target].notna()]
     ff = fold_features or {}
+    lr = learner if isinstance(learner, dict) else \
+        {name: learner for name in fsets}
     preds = {name: oof_predict(d, cols, target, blocks, weight, seed,
-                               fold_features=ff.get(name))
+                               fold_features=ff.get(name),
+                               learner=lr.get(name, 'hgb'))
              for name, cols in fsets.items()}
     names = list(fsets)
     pairs = pairs or list(zip(names[:-1], names[1:]))
@@ -225,13 +359,13 @@ def ladder(df, target, fsets, blocks, weight=None, seed=0, n_boot=1000,
     return rows, pd.DataFrame(preds, index=d.index)
 
 
-def crossfit_residuals(df, target, cols, blocks, seed=0):
+def crossfit_residuals(df, target, cols, blocks, seed=0, learner='hgb'):
     """target minus its out-of-fold prediction from cols (no leakage)"""
     ok = df[target].notna()
     r = pd.Series(np.nan, index=df.index)
     d = df[ok]
     r[ok] = d[target].values - oof_predict(d, cols, target, blocks,
-                                           seed=seed)
+                                           seed=seed, learner=learner)
     return r
 
 
