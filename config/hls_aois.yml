@@ -1,0 +1,38 @@
+# Prototype areas of interest for testing whether HLS shows a signal inside
+# USFS Aerial Detection Survey (ADS) mortality polygons. Centers were chosen
+# as the 30 km windows (3 km search step) with the most ADS mortality acreage
+# spread across 2014-2024 within each region; see docs/hls_mortality_prototype.md
+aois:
+  sierra_nf:
+    # Sierra NF near Shaver/Huntington Lake; mixed pine/fir, peak 2015-2017
+    center: [-119.375, 37.396]
+    epsg: 32611
+  stanislaus:
+    # Stanislaus/Eldorado NF; fir-dominated, mortality sustained through 2024
+    center: [-120.165, 38.505]
+    epsg: 32610
+  lassen:
+    # Lassen NF; white fir and ponderosa pine
+    center: [-121.143, 40.598]
+    epsg: 32610
+  neon_soap_teak:
+    # NEON Soaproot Saddle (SOAP) and Lower Teakettle (TEAK) sites, covering
+    # the Hemming-Schroeder et al. (2023) lidar-based 30 m tree mortality
+    # rasters (2013, 2017, 2018, 2019, 2021) with ~1.5 km margin
+    center: [-119.133, 37.017]
+    size_m: [33000, 19000]
+    epsg: 32611
+
+size_m: 30000
+resolution: 30
+
+years: [2013, 2025]  # inclusive
+doy_range: [150, 300]  # inclusive; brackets the ADS flight season
+max_tile_cloud: 70  # whole-tile cloud cover (%) filter, applied before reading
+min_clear_frac: 0.01  # skip granules with less than this AOI clear fraction
+
+collections: [HLSL30, HLSS30]
+# Reflectance band per role; Fmask is always read
+bands:
+  HLSL30: {blue: B02, green: B03, red: B04, nir: B05, swir1: B06, swir2: B07}
+  HLSS30: {blue: B02, green: B03, red: B04, nir: B8A, swir1: B11, swir2: B12}
