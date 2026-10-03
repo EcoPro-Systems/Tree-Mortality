@@ -1,0 +1,48 @@
+description: Elevation quartile cutpoints (m) of 90 m cells of NLCD 2013 forest with
+  no fire or harvest through 2025 (>= 70% of the cell valid); elevation only, computed
+  before any 2020-22 response of these areas
+computed: '2026-10-03'
+scale_m: 90
+areas:
+  stanislaus:
+    cells: 52456
+    cutpoints_m:
+    - 1732.5
+    - 1976.0
+    - 2178.3
+    cells_per_stratum:
+    - 13114
+    - 13114
+    - 13114
+    - 13114
+    elevation_range_m:
+    - 930.6
+    - 2748.5
+  seki:
+    cells: 389
+    cutpoints_m:
+    - 1915.8
+    - 2006.7
+    - 2234.7
+    cells_per_stratum:
+    - 97
+    - 97
+    - 97
+    - 98
+    elevation_range_m:
+    - 1692.0
+    - 2356.6
+  yosemite_rest:
+    cells: 361464
+    cutpoints_m:
+    - 965.5
+    - 2334.0
+    - 2717.9
+    cells_per_stratum:
+    - 90366
+    - 90366
+    - 90366
+    - 90366
+    elevation_range_m:
+    - 181.2
+    - 3700.2

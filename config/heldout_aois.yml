@@ -1,0 +1,22 @@
+# Held-out sites inside the AVIRIS-C Yosemite flight box, kept apart from
+# hls_aois.yml so that scripts looping over every AOI there do not pick up
+# these large grids. Each grid is a bounding box on the 30 m UTM 11 lattice
+# of the trait mosaics; the site itself is the cell mask in
+# env/<aoi>_mask.nc (fetch_heldout_masks.py).
+aois:
+  yosemite_rest:
+    # the whole 2013 Yosemite-box trait mosaic extent; the mask keeps the
+    # footprint outside SEKI and outside the neon_soap_teak and sierra_nf
+    # AOIs
+    center: [-119.42409, 37.34854]
+    size_m: [117090, 189810]
+    epsg: 32611
+  seki:
+    # the part of Sequoia and Kings Canyon NPs inside the Yosemite-box
+    # footprint (western Kings Canyon, Grant Grove), with ~1 km margin
+    center: [-118.91017, 36.78298]
+    size_m: [15300, 31000]
+    epsg: 32611
+
+size_m: 30000
+resolution: 30

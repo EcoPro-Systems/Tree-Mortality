@@ -28,9 +28,14 @@ MIN_VALID = 0.7  # fraction of 30 m pixels valid for a coarser cell
 # folds (every experiment so far); an int shuffles blocks into folds with
 # that seed (fold-assignment sensitivity checks)
 FOLD_SEED = None
+# Fixed fold assignments over which a contrast is averaged when the rule
+# "mean over several fold splits" is used (bootstrap_r2_splits); distinct
+# from the seeds of the sensitivity reruns (1-3)
+FOLD_SEEDS = (11, 12, 13, 14, 15)
+GLOBAL = 'global'  # fold_seed default: use the module's FOLD_SEED
 # AOIs held out for the 2020-22 drought: their cycle-2 responses stay
 # unexamined until models fixed on the other AOIs are applied to them
-HELD_OUT = {'stanislaus', 'seki'}
+HELD_OUT = {'stanislaus', 'seki', 'yosemite_rest'}
 
 
 def check_cycle2(aoi, allow=False):
@@ -220,8 +225,12 @@ def wr2(y, p, w=None):
 
 
 def oof_predict(df, cols, target, blocks, weight=None, seed=0,
-                n_splits=N_SPLITS, fold_features=None, learner='hgb'):
+                n_splits=N_SPLITS, fold_features=None, learner='hgb',
+                fold_seed=GLOBAL):
     """Out-of-fold predictions with GroupKFold over spatial blocks.
+
+    fold_seed: None for GroupKFold's deterministic assignment, an int to
+    shuffle blocks into folds; defaults to the module's FOLD_SEED.
 
     fold_features(df, train_mask) -> (n, k) array: extra features that
     must be recomputed in each fold from the training cells only (e.g.
@@ -231,9 +240,9 @@ def oof_predict(df, cols, target, blocks, weight=None, seed=0,
     X, y = df[cols].values, df[target].values
     g = df[blocks].values
     w = None if weight is None else df[weight].values
-    kf = (GroupKFold(n_splits=n_splits) if FOLD_SEED is None else
-          GroupKFold(n_splits=n_splits, shuffle=True,
-                     random_state=FOLD_SEED))
+    fs = FOLD_SEED if fold_seed == GLOBAL else fold_seed
+    kf = (GroupKFold(n_splits=n_splits) if fs is None else
+          GroupKFold(n_splits=n_splits, shuffle=True, random_state=fs))
     for tr, te in kf.split(X, groups=g):
         Xf = X
         if fold_features is not None:
@@ -289,6 +298,22 @@ def block_sums(y, preds, w, blocks):
     return s, nb
 
 
+def block_draws(nb, n_boot, seed=0):
+    """(n_boot, nb) multiplicities of nb blocks resampled with
+    replacement"""
+    rng = np.random.default_rng(seed)
+    draws = rng.integers(0, nb, size=(n_boot, nb))
+    return np.stack([np.bincount(d, minlength=nb)
+                     for d in draws]).astype(float)
+
+
+def r2_draws(s, mult, key):
+    """Weighted R² of prediction key under block multiplicities mult"""
+    sw, swy, swy2 = mult @ s['w'], mult @ s['wy'], mult @ s['wy2']
+    sst = swy2 - swy ** 2 / sw
+    return 1 - (mult @ s[key]) / sst
+
+
 def bootstrap_r2(y, preds, blocks, w=None, n_boot=1000, seed=0,
                  pairs=()):
     """Block-bootstrap R² for each prediction and R² differences.
@@ -299,15 +324,8 @@ def bootstrap_r2(y, preds, blocks, w=None, n_boot=1000, seed=0,
     y = np.asarray(y, float)
     w = np.ones(len(y)) if w is None else np.asarray(w, float)
     s, nb = block_sums(y, preds, w, blocks)
-    rng = np.random.default_rng(seed)
-    draws = rng.integers(0, nb, size=(n_boot, nb))
-    m = np.stack([np.bincount(d, minlength=nb) for d in draws]).astype(float)
-
-    def r2(mult, key):
-        sw, swy, swy2 = mult @ s['w'], mult @ s['wy'], mult @ s['wy2']
-        sst = swy2 - swy ** 2 / sw
-        return 1 - (mult @ s[key]) / sst
-
+    m = block_draws(nb, n_boot, seed)
+    r2 = lambda mult, key: r2_draws(s, mult, key)
     one = np.ones((1, nb))
     out = {}
     for k in preds:
@@ -318,6 +336,74 @@ def bootstrap_r2(y, preds, blocks, w=None, n_boot=1000, seed=0,
         out[f'{bname}-{a}'] = (r2(one, bname)[0] - r2(one, a)[0],
                                *np.percentile(d, [2.5, 97.5]))
     return out
+
+
+def bootstrap_r2_splits(y, preds, blocks, w=None, n_boot=1000, seed=0,
+                        pairs=()):
+    """Block-bootstrap R² and R² differences averaged over fold splits.
+
+    preds: {split: {name: oof predictions}}, every split on the same cells.
+    One set of block draws serves every split; each draw averages the R²
+    (or the paired difference) over the splits, so the CI is that of the
+    average. Returns {name or 'b-a': dict(est, lo, hi, per_split={split:
+    (est, lo, hi)})}."""
+    y = np.asarray(y, float)
+    w = np.ones(len(y)) if w is None else np.asarray(w, float)
+    sums = {k: block_sums(y, p, w, blocks) for k, p in preds.items()}
+    nb = next(iter(sums.values()))[1]
+    m = block_draws(nb, n_boot, seed)
+    one = np.ones((1, nb))
+    names = list(next(iter(preds.values())))
+    stats = {n: (lambda mult, n=n: {k: r2_draws(s, mult, n)
+                                    for k, (s, _) in sums.items()})
+             for n in names}
+    stats.update({f'{b}-{a}': (lambda mult, a=a, b=b: {
+        k: r2_draws(s, mult, b) - r2_draws(s, mult, a)
+        for k, (s, _) in sums.items()}) for a, b in pairs})
+    out = {}
+    for key, f in stats.items():
+        pt, bt = f(one), f(m)
+        per = {k: (pt[k][0], *np.percentile(bt[k], [2.5, 97.5]))
+               for k in preds}
+        avg = np.mean([bt[k] for k in preds], 0)
+        out[key] = dict(est=float(np.mean([pt[k][0] for k in preds])),
+                        lo=np.percentile(avg, 2.5),
+                        hi=np.percentile(avg, 97.5), per_split=per)
+    return out
+
+
+def ladder_splits(df, target, fsets, blocks, fold_seeds=FOLD_SEEDS,
+                  weight=None, seed=0, n_boot=1000, pairs=None,
+                  learner='hgb'):
+    """ladder() repeated over fixed fold assignments, with every R² and
+    gain averaged over them (bootstrap_r2_splits). Rows carry
+    fold_seed='mean' for the average and the seed for each split.
+    Returns (rows, {seed: preds DataFrame})."""
+    d = df[df[target].notna()]
+    lr = learner if isinstance(learner, dict) else \
+        {name: learner for name in fsets}
+    preds = {fs: {name: oof_predict(d, cols, target, blocks, weight, seed,
+                                    learner=lr.get(name, 'hgb'),
+                                    fold_seed=fs)
+                  for name, cols in fsets.items()}
+             for fs in fold_seeds}
+    names = list(fsets)
+    pairs = pairs or list(zip(names[:-1], names[1:]))
+    w = None if weight is None else d[weight].values
+    bs = bootstrap_r2_splits(d[target].values, preds, d[blocks].values, w,
+                             n_boot, seed, pairs)
+    rows = []
+    for key, (b, a) in [(n, (n, '')) for n in names] + \
+            [(f'{b}-{a}', (b, a)) for a, b in pairs]:
+        x = bs[key]
+        base = dict(target=target, features=b, compare=a, boot_blocks=blocks,
+                    n=len(d))
+        rows.append(dict(base, fold_seed='mean', r2=x['est'], lo=x['lo'],
+                         hi=x['hi']))
+        for fs, (est, lo, hi) in x['per_split'].items():
+            rows.append(dict(base, fold_seed=fs, r2=est, lo=lo, hi=hi))
+    return rows, {fs: pd.DataFrame(p, index=d.index)
+                  for fs, p in preds.items()}
 
 
 def ladder(df, target, fsets, blocks, weight=None, seed=0, n_boot=1000,
@@ -359,13 +445,15 @@ def ladder(df, target, fsets, blocks, weight=None, seed=0, n_boot=1000,
     return rows, pd.DataFrame(preds, index=d.index)
 
 
-def crossfit_residuals(df, target, cols, blocks, seed=0, learner='hgb'):
+def crossfit_residuals(df, target, cols, blocks, seed=0, learner='hgb',
+                       fold_seed=GLOBAL):
     """target minus its out-of-fold prediction from cols (no leakage)"""
     ok = df[target].notna()
     r = pd.Series(np.nan, index=df.index)
     d = df[ok]
     r[ok] = d[target].values - oof_predict(d, cols, target, blocks,
-                                           seed=seed, learner=learner)
+                                           seed=seed, learner=learner,
+                                           fold_seed=fold_seed)
     return r
 
 

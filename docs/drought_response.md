@@ -24,11 +24,12 @@ analysed the same way.
 |---|---|---|
 | Landsat C2 L2 summer and June composites | `landsat_composites/<aoi>_<variant>_doy{182-273,145-190}.nc` | From `fetch_landsat_c2_ee.py` (Earth Engine). 2008–2025. Variants: `c2` (L5/7/8/9), `c2l7` (Landsat 7 only, to 2022), `c2oli` (Landsat 8/9 only) |
 | Env, terrain, structure, masks | `env/<aoi>_env.nc` | From `aoi_env_layers.py`. BCMv8 water-year CWD/AET/PET/PPT/Tmax and SPEI1–4 (2008–2024, nearest 270 m cell); local SRTM terrain indices (`topo/generated/`); GLAD height 2010, TCC 2010/2013, LANDFIRE 2014 EVH/EVC; NEON lidar tree summaries; NLCD 2013 forest; per-year fire (MTBS, CAL FIRE FRAP, CAL FIRE prescribed burns) and FACTS harvest/salvage, 2000–2025 |
-| Fire and harvest polygons | `fire/disturbance/{frap_fires,rx_fires,facts_harvest}.gpkg` | From `fetch_disturbance_aois.py`: CAL FIRE FRAP perimeters (all sizes), CAL FIRE prescribed-fire perimeters, USFS FACTS timber-harvest activities (EDW) |
+| Fire and harvest polygons | `fire/disturbance/{frap_fires,rx_fires,facts_harvest}.gpkg`; `fire/disturbance_heldout/` for the held-out grids | From `fetch_disturbance_aois.py`: CAL FIRE FRAP perimeters (all sizes), CAL FIRE prescribed-fire perimeters, USFS FACTS timber-harvest activities (EDW) |
+| Held-out site grids and masks | `config/heldout_aois.yml`; `env/{seki,yosemite_rest}_{env,mask}.nc`; `geom/seki_boundary.geojson` | From `fetch_heldout_masks.py` (2013 and 2018 trait-mosaic footprints, NPS SEQU/KICA boundary) and `aoi_env_layers.py --masks-only` (NLCD, terrain, fire and harvest only). Elevation strata: `config/heldout_strata.yml` (`proto_heldout_strata.py`) |
 | AVIRIS flight-line inventory | `aviris_locator/AVIRIS-{C,NG}_flight_{table.csv,s.geojson}` | [ORNL DAAC 2140](https://doi.org/10.3334/ORNLDAAC/2140) flight tables (to Aug 2024) |
 | WDTS traits and canopy water | `wdts/<aoi>_traits.nc`, `wdts/<aoi>_cwc.nc` | As before. `fetch_wdts_cwc.py` now also saves `nadir_dist`. `stanislaus` traits (Tahoe box, UTM 11) are warped onto the UTM 10 AOI grid with nearest neighbour; no canopy water there yet |
 | Geology | `env/<aoi>_geology.nc`; source in `geology/` | From `fetch_geology.py`: USGS State Geologic Map Compilation, California (1:750,000), grouped into granitic, volcanic, metamorphic, surficial and other on the 30 m grids |
-| Reflectance caches for emulated retrievals | `wdts/sim/<aoi>_refl<year>.nc`, `wdts/sim/<aoi>_refl_<yymmdd>_<product>.nc`, `wdts/sim/<aoi>_l8_<date>.nc` | From `proto_spaceborne_sim.py refl` (2013; 2018 for NEON and `sierra_nf`; 2013 for `stanislaus`), `proto_spaceborne_ts.py refl` (NEON and `sierra_nf`: 2013-05-03 and 2013-06-26 from ORNL DAAC 2391; 2018-06-22 and 2018-08-28 from ORNL DAAC 2154) and `fetch_landsat_c2_ee.py --scene` (2013-05-04, 05-20, 06-05, 06-21, 07-07, 07-23 (no clear pixels), 08-08; 2013-06-12 and 06-28 Tahoe; 2018-06-19, 07-05, 07-21, 08-06, 08-22, 09-07) |
+| Reflectance caches for emulated retrievals | `wdts/sim/<aoi>_refl<year>.nc`, `wdts/sim/<aoi>_refl_<yymmdd>_<product>.nc`, `wdts/sim/<aoi>_l8_<date>.nc` | From `proto_spaceborne_sim.py refl` (2013; 2018 for NEON and `sierra_nf`; 2013 for `stanislaus`), `proto_spaceborne_ts.py refl` (NEON and `sierra_nf`: 2013-05-03 and 2013-06-26 from ORNL DAAC 2391; 2018-06-22 and 2018-08-28 from ORNL DAAC 2154) and `fetch_landsat_c2_ee.py --scene` (2013-05-04, 05-20, 06-05, 06-21, 07-07, 07-23 (no clear pixels), 08-08; 2013-05-27 (no clear pixels), 06-12 and 06-28 Tahoe; 2018-06-19, 07-05, 07-21, 08-06, 08-22, 09-07) |
 | Airborne lidar structure | `lidar/<aoi>_lidar.nc`; raw in `lidar/aso/`, `lidar/lvis2008/` | From `fetch_lidar_structure.py`: ASO 2014–17 composite (Ferraz et al. 2020) and LVIS Sep 2008 footprints on the 30 m grids. Coverage and sources: `lidar_coverage.md` |
 
 ## Airborne imaging spectroscopy over the study boxes, 2018–2025 (`hls_results/airborne_coverage/`)
@@ -666,6 +667,11 @@ explains it.
 - Their cycle-2 (2020–22) responses are not computed or examined.
 - `response_common.HELD_OUT` and `check_cycle2()` enforce this for the
   AOIs: `proto_response_transfer.build_cycle` refuses cycle 2 for them.
+- The two Yosemite-box sites have their own grids (§34):
+  - `yosemite_rest`: the June 12 2013 and June 22 2018 trait-mosaic
+    footprints, outside SEKI and outside the `neon_soap_teak` and
+    `sierra_nf` grids;
+  - `seki`: the same footprints inside the SEQU/KICA boundary.
 - The Tahoe-box work in §8–9 and the canopy water and dynamics in §14 use
   cycle 1 only.
 
@@ -2446,6 +2452,135 @@ Tuning changes cycle-2 Env+S by −0.003 to +0.007.
   residualized with hgb for every learner; no deep tabular models; two runs
   ran concurrently, which affects timing, not results.
 
+### 33. Does the Tahoe-box structural-carbon direction survive a Landsat scene? (`hls_results/spaceborne_only/carbon_stanislaus/`)
+
+In the Yosemite box, residual lignin and cellulose go with worse recovery
+beyond the Landsat bands, in cycle 1 (§24) and cycle 2 (§29). The Tahoe
+box has the weakest drought signal of the three areas and shows only the
+structural-carbon half of the trait directions (§8–9, §22, §27, §30). This
+section asks whether that half also survives a Landsat scene there.
+Cycle 1 only.
+
+**Data.** The June 4 2013 Tahoe trait mosaic (non-`_v2`, cross-track
+normalized) and Landsat 8 path-43 scenes near it (`fetch_landsat_c2_ee.py
+--scene`):
+
+| Scene | Days from the flight | Clear share of the AOI |
+|---|---|---|
+| 2013-05-27 | −8 | 0% (no clear pixels) |
+| 2013-06-12 | +8 | 48% |
+| **2013-06-28** | +24 | **99%** |
+
+No path-42 scene covers the box on 2013-06-05. Jun 28 is the nearest
+usable scene. Jun 12 is a near-date check: cell means use only clear
+pixels, so about half of its cells carry no Landsat information.
+
+**Method** (`proto_spaceborne_only.py carbon --resid-landsat l8raw
+--resid-landsat l8multi --skip-ladder`).
+- Traits are residualized out of fold on three bases: Env+S; Env+S + the
+  scene's bands and indices (l8raw); and Env+S + the 2013 June and Jul–Sep
+  composites (l8multi).
+- The statistic is the within-stratum ρ (aridity × 200 m elevation) with
+  cycle-1 recovery, with 1 km block-bootstrap CIs.
+- 55,105 cells.
+- The run is repeated with blocks shuffled into folds (`--fold-seed` 1–3)
+  beside the default assignment.
+
+**NDMI recovery**, default folds (range over the four fold assignments in
+brackets; bold where every CI excludes 0):
+
+| Residual trait | on Env+S | + Jun 28 scene | + 2013 composites | + Jun 12 scene |
+|---|---|---|---|---|
+| **Lignin** | **−0.109** (−0.105 to −0.109) | **−0.090** (−0.086 to −0.090) | **−0.084** (−0.078 to −0.084) | **−0.108** |
+| **Cellulose** | **−0.116** (−0.116 to −0.119) | **−0.095** (−0.095 to −0.099) | **−0.092** (−0.092 to −0.095) | **−0.117** |
+| Fiber | **−0.081** | **−0.067** | **−0.063** | |
+| Nitrogen | +0.025 (+0.021 to +0.025; CI touches 0 under two) | +0.016 (n.s.) | +0.016 (n.s.) | +0.017 (n.s.) |
+| LMA | +0.023 (n.s.) | **+0.028** (+0.028 to +0.033; wrong sign, lower bounds +0.001 to +0.007) | **+0.033** (wrong sign) | +0.025 (n.s.) |
+
+- **The structural-carbon direction survives the Landsat bands in the
+  Tahoe box.** It survives under every fold assignment, with either Landsat
+  base. Beyond the scene the box keeps 83% of the lignin ρ and 82% of the
+  cellulose ρ.
+- In the Yosemite box, cycle 1 (§24, the same model, the Jun 21 scene
+  nine days after the flight), the fractions kept are:
+  - NEON: lignin −0.166 → −0.108 (65%), cellulose −0.154 → −0.125 (81%);
+  - `sierra_nf`: lignin −0.185 → −0.132 (71%), cellulose −0.163 → −0.122
+    (75%).
+
+  The Tahoe direction starts weaker but loses proportionally less.
+- The Jun 28 scene is 24 days after the flight, so it is a weaker control
+  than the nine-day Yosemite-box scenes. The two composites, which span June
+  to September, remove a little more (lignin −0.084, cellulose −0.092).
+- N keeps no direction. LMA has a weak wrong-sign one (+0.03), as in §30.
+- **NIRv recovery** is weaker throughout:
+  - lignin −0.046 on Env+S, −0.033 (−0.029 to −0.033, CIs exclude 0)
+    beyond the scene, and −0.016 (n.s. under every assignment) beyond the
+    composites;
+  - cellulose −0.062, −0.045 and −0.030 (−0.030 to −0.034), every CI
+    excluding 0.
+
+**Reading.** In cycle 1 the Tahoe box keeps the lignin and cellulose →
+slower NDMI recovery direction once a Landsat scene, or the season's
+composites, are in the residual base. It has the same sign as in the
+Yosemite box and holds under every fold assignment tried. A second-drought
+test of the direction beyond Landsat therefore has cycle-1 support on all
+three areas. For NIRv recovery, only cellulose keeps the direction beyond
+the composites.
+
+### 34. Held-out sites in the Yosemite box, and elevation strata fixed in advance (`config/heldout_aois.yml`, `config/heldout_strata.yml`)
+
+§10 holds out the Tahoe box, SEKI and the rest of the Yosemite box for the
+second drought. Only the Tahoe box (`stanislaus`) had a grid. This section
+defines the other two. It also fixes the elevation strata in which
+cross-drought rank skill will be reported on all three (§21). The strata
+are computed from elevation alone, before any of their 2020–22 responses
+exist.
+
+**Grids and masks** (`fetch_heldout_masks.py`, `config/heldout_aois.yml`).
+- Both sites lie on the 30 m UTM 11 lattice of the Yosemite-box trait
+  mosaics.
+- The footprint is `flight_id` > 0 in both the June 12 2013 (`_v2`) and
+  June 22 2018 mosaics, the dates of the 2013 and 2018 traits. The two
+  footprints cover 16,626 and 17,623 km²; their intersection is 16,489 km².
+- `yosemite_rest` is the whole mosaic extent (117 × 190 km). It keeps the
+  footprint outside SEKI and outside the `neon_soap_teak` and `sierra_nf`
+  grids: 14,915 km².
+- `seki` is a 15 × 31 km box. It keeps the footprint inside the NPS
+  SEQU/KICA boundary: 47 km², in western Kings Canyon around Grant Grove.
+  No other trait-mosaic box reaches the parks.
+- The grids live in their own config file, so scripts that loop over
+  every AOI of `hls_aois.yml` do not pick them up.
+- `aoi_env_layers.py --masks-only` builds NLCD 2013, terrain and the
+  per-year fire and harvest layers for them, but not climate or structure,
+  which a 117 × 190 km 30 m grid would not hold in memory. Their fire and
+  harvest polygons are in `fire/disturbance_heldout/`.
+- `yosemite_rest` is added to `response_common.HELD_OUT`.
+
+**Elevation strata** (`proto_heldout_strata.py`).
+- Cells: 90 m cells (≥ 70% valid) of NLCD 2013 forest with no fire or
+  harvest through 2025, inside the site mask.
+- Elevation quartile cutpoints are computed separately for each site. No
+  Landsat response or composite enters.
+
+| Site | Cells | Cutpoints (m) | Elevation range (m) |
+|---|---|---|---|
+| `stanislaus` (Tahoe box) | 52,456 | 1,733 / 1,976 / 2,178 | 931–2,749 |
+| `yosemite_rest` | 361,464 | 966 / 2,334 / 2,718 | 181–3,700 |
+| `seki` | 389 | 1,916 / 2,007 / 2,235 | 1,692–2,357 |
+
+For comparison, the pilot AOIs on the same definition: NEON 26,672 cells,
+1,178 / 1,904 / 2,306 m; `sierra_nf` 20,809 cells, 1,771 / 2,143 /
+2,389 m.
+
+- **SEKI is too small to test on its own.** Fire and harvest remove 55% of its
+  footprint forest pixels by 2019 and 90% by 2025 (47,538 → 4,764 pixels),
+  leaving 389 cells. The forward-pilot minimum is 5,000. SEKI can enter
+  only pooled with `yosemite_rest`, or through trait data from outside the
+  Yosemite box.
+- **`yosemite_rest` is large and spans more elevation than the pilots.**
+  It has 7.6× the cells of the two pilot AOIs together, and its lowest quartile (< 966 m) is
+  foothill forest and woodland below the mixed-conifer zone of the pilots.
+
 ## Summary
 
 1. **Coverage.**
@@ -2599,10 +2734,22 @@ Tuning changes cycle-2 Env+S by −0.003 to +0.007.
     (with and without lidar), and no learner makes the cross-drought
     transfer work. For stress response at `sierra_nf` tuning adds +0.038,
     and the trait gains are larger within the tuned learner.
+25. **The Tahoe-box structural-carbon direction survives a Landsat scene**
+    (§33). Cycle 1, NDMI recovery: residual lignin −0.109 → −0.090 and
+    cellulose −0.116 → −0.095 beyond the nearest clear 2013 scene (−0.084 /
+    −0.092 beyond the June and Jul–Sep composites). Every CI excludes 0
+    under every fold assignment. That keeps more than 80% of the ρ, against
+    65–81% in the Yosemite box.
+26. **Held-out sites in the Yosemite box** (§34). `yosemite_rest` (361,464
+    undisturbed forest cells) and `seki` (389 cells, too few on their own)
+    are defined on the trait-mosaic footprints. Elevation quartile cutpoints
+    for them and the Tahoe box are fixed in `config/heldout_strata.yml` from
+    elevation alone.
 
 ## Code
 
-`fetch_landsat_c2_ee.py` (`--scene`), `fetch_disturbance_aois.py`, `aoi_env_layers.py`,
+`fetch_landsat_c2_ee.py` (`--scene`), `fetch_disturbance_aois.py`, `aoi_env_layers.py` (`--masks-only`, `--disturbance-dir`),
+`fetch_heldout_masks.py`, `proto_heldout_strata.py`,
 `query_airborne_coverage.py`,
 `response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`,
 `proto_response_traits.py` (`--structure`, `--ablation`, `--neighbour`,
@@ -2617,8 +2764,9 @@ Tuning changes cycle-2 Env+S by −0.003 to +0.007.
 `proto_transfer_diagnostics.py`,
 `proto_structure_from_spectra.py`, `proto_trait_diversity.py`,
 `proto_spaceborne_sim.py` (`refl` with `--year`, `simulate` with
-`--l8`/`--seed`, `compare`), `proto_spaceborne_only.py` (`compare`,
-`carbon`), `proto_spaceborne_ts.py` (`refl`, `emulate`, `compare` with `--landsat-extra` and `--fold-seed`),
+`--l8`/`--seed`, `compare`), `proto_spaceborne_only.py` (`compare` with
+`--no-stack`, `carbon` with `--resid-landsat` and `--skip-ladder`; both
+with `--fold-seed` and `--tag`), `proto_spaceborne_ts.py` (`refl`, `emulate`, `compare` with `--landsat-extra` and `--fold-seed`),
 `proto_retrieval_transfer.py` (`emulate`, `score`),
 `proto_model_capacity.py` (`within`, `transfer`, `forward`; learners in
 `response_common.make_model`),
