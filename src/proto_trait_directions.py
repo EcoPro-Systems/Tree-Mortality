@@ -221,13 +221,17 @@ def strata_of(d):
             (d.elevation // ELEV_BAND).astype(int).astype(str))
 
 
-def rho_within_boot(d, col, target, strata, blocks, n_boot, seed=0,
-                    min_n=100):
-    """Bootstrap percentiles of the size-weighted within-stratum ρ.
+def rho_within_draws(d, col, target, strata, blocks, n_boot, seed=0,
+                     min_n=100, mask=None):
+    """Bootstrap draws of the size-weighted within-stratum ρ, or None.
 
     Ranks are computed once within each stratum; each draw resamples 1 km
-    blocks and takes the multiplicity-weighted Pearson of the ranks."""
+    blocks and takes the multiplicity-weighted Pearson of the ranks. mask
+    (optional) restricts the cells further, so that several columns can
+    share one set of cells and hence the same draws."""
     ok = (d[col].notna() & d[target].notna()).values
+    if mask is not None:
+        ok &= np.asarray(mask)
     x, y = d[col].values[ok], d[target].values[ok]
     s, b = strata.values[ok], blocks.values[ok]
     s_codes, s_inv = np.unique(s, return_inverse=True)
@@ -235,7 +239,7 @@ def rho_within_boot(d, col, target, strata, blocks, n_boot, seed=0,
     keep = size[s_inv] >= min_n
     x, y, s_inv, b = x[keep], y[keep], s_inv[keep], b[keep]
     if len(x) < 200:
-        return np.nan, np.nan
+        return None
     s_codes, s_inv = np.unique(s_inv, return_inverse=True)
     rx, ry = np.empty(len(x)), np.empty(len(y))
     for j in range(len(s_codes)):
@@ -260,7 +264,40 @@ def rho_within_boot(d, col, target, strata, blocks, n_boot, seed=0,
         r = np.where(sw >= min_n / 2, r, np.nan)
         wts = np.where(np.isfinite(r), sw, 0)
         rho.append(np.nansum(np.nan_to_num(r) * wts, 1) / wts.sum(1))
-    return tuple(np.percentile(np.concatenate(rho), [2.5, 97.5]))
+    return np.concatenate(rho)
+
+
+def rho_within_boot(d, col, target, strata, blocks, n_boot, seed=0,
+                    min_n=100):
+    """Bootstrap percentiles of the size-weighted within-stratum ρ"""
+    r = rho_within_draws(d, col, target, strata, blocks, n_boot, seed,
+                         min_n)
+    if r is None:
+        return np.nan, np.nan
+    return tuple(np.percentile(r, [2.5, 97.5]))
+
+
+def rho_within_splits(d, cols, target, strata, blocks, n_boot, seed=0,
+                      min_n=100):
+    """Within-stratum ρ averaged over several versions of one variable
+    (e.g. residuals cross-fitted under different fold assignments).
+
+    Every column uses the same cells and the same block draws, and each
+    draw averages ρ over the columns. Returns dict(rho_within (mean of the
+    per-column estimates), lo, hi, per_split=[(rho_within, lo, hi)])."""
+    mask = np.logical_and.reduce([d[c].notna().values for c in cols])
+    dd = d[mask]
+    est = {u['feature']: u['rho_within'] for u in
+           rc.within_strata_rho(dd, cols, target, strata[mask], min_n)}
+    draws = [rho_within_draws(d, c, target, strata, blocks, n_boot, seed,
+                              min_n, mask) for c in cols]
+    if any(r is None for r in draws) or len(est) < len(cols):
+        return dict(rho_within=np.nan, lo=np.nan, hi=np.nan, per_split=[])
+    per = [(est[c], *np.percentile(r, [2.5, 97.5]))
+           for c, r in zip(cols, draws)]
+    lo, hi = np.percentile(np.mean(draws, 0), [2.5, 97.5])
+    return dict(rho_within=float(np.mean([est[c] for c in cols])), lo=lo,
+                hi=hi, per_split=per)
 
 
 def directions(d, cols, targets, n_boot, **tags):

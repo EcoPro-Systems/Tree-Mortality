@@ -2581,6 +2581,117 @@ For comparison, the pilot AOIs on the same definition: NEON 26,672 cells,
   It has 7.6× the cells of the two pilot AOIs together, and its lowest quartile (< 966 m) is
   foothill forest and woodland below the mixed-conifer zone of the pilots.
 
+### 35. A second-drought test averaged over fixed fold splits, dry run on the pilot sites (`hls_results/forward_pilot_rule/`)
+
+§31 found that reassigning 1 km blocks to folds can move a single
+contrast by more than its bootstrap CI shows. A test fixed in advance for
+the held-out sites therefore should not rest on one fold assignment. This
+section implements such a test and runs it on the two pilot sites, on the
+§11 forward-pilot cells, exactly as the held-out sites will get it.
+
+**Rule** (`proto_forward_pilot.py --rule`; `response_common.FOLD_SEEDS`,
+`ladder_splits`, `bootstrap_r2_splits`;
+`proto_trait_directions.rho_within_splits`).
+- Each contrast is fitted under five fixed fold assignments: 1 km blocks
+  shuffled into five folds with seeds 11–15.
+- One set of 1 km block-bootstrap draws serves every assignment. Each draw
+  averages the paired ΔR² (or the within-stratum ρ) over the five, so the
+  CI is that of the average.
+- A contrast passes if the CI of the average excludes 0. Per-split values
+  and CIs are kept beside it.
+- With one assignment the code reproduces `bootstrap_r2` and
+  `rho_within_boot` exactly.
+- Learner: the tuned gradient boosting of §32, on both arms of every skill
+  contrast and in the transfer. Trait residuals use the default learner.
+
+The test has three parts. NDMI recovery is primary; NIRv recovery and NDMI
+resistance are reported beside it.
+- **Skill:** Env+S → +Leg (the cycle-1 legacy), and Env+S+Leg → +T18 (the
+  June 2018 traits, z-scored per date).
+- **Directions:** within-stratum ρ of 2018 N, LMA, lignin and cellulose
+  with cycle-2 recovery. They are reported as standardized, and
+  residualized on four bases: Env+S; Env+S+L1; Env+S+Leg; Env+S+Leg+L1.
+  L1 is the Jun 19 2018 Landsat 8 scene, three days before the flight.
+- **Transfer:** a cycle-1 model (Env+S, or Env+S+T13) applied to cycle 2
+  with T18 swapped in. Rank ρ is computed pooled and within elevation
+  quartiles. The quartile cutpoints come from elevation alone on the forest
+  cells undisturbed through 2025 (`proto_heldout_strata.py`, the §34
+  procedure), not from the response cells. The quartiles are therefore not
+  equal in size on the analysis cells (NEON 4,480–6,659 cells).
+
+**Skill** (NEON 24,301 cells / `sierra_nf` 20,055; average over the five
+splits, 95% CI, per-split range):
+
+| ΔR² | NDMI recovery | NIRv recovery | NDMI resistance |
+|---|---|---|---|
+| +Leg over Env+S, NEON | **+0.072** [0.057, 0.094] (0.065–0.078) | **+0.071** | **+0.097** |
+| +Leg over Env+S, `sierra_nf` | **+0.157** [0.135, 0.179] (0.150–0.163) | **+0.103** | **+0.086** |
+| **+T18 over Env+S+Leg, NEON** | **+0.032** [0.024, 0.041] (0.029–0.039) | **+0.034** [0.027, 0.042] | **+0.024** [0.018, 0.031] |
+| **+T18 over Env+S+Leg, `sierra_nf`** | **+0.021** [0.015, 0.028] (0.016–0.027) | **+0.029** [0.022, 0.037] | **+0.022** [0.015, 0.030] |
+
+Env+S R² for NDMI recovery is 0.593 (NEON) and 0.486 (`sierra_nf`). Every
+per-split CI excludes 0 as well; the lowest per-split lower bound is
++0.008. These gains match §11 under the default learner and folds (T18
+beyond Leg +0.035 / +0.019).
+
+**Directions**, NDMI recovery (average over the five splits; bold where
+the CI of the average excludes 0):
+
+| Residual ρ, NEON / `sierra_nf` | Nitrogen | LMA | Lignin | Cellulose |
+|---|---|---|---|---|
+| standardized, not residualized | **+0.30** / **+0.38** | **−0.31** / **−0.36** | **−0.23** / **−0.35** | **−0.12** / **−0.24** |
+| on Env+S | **+0.23** / **+0.23** | **−0.24** / **−0.23** | **−0.16** / **−0.23** | **−0.06** / **−0.16** |
+| on Env+S+L1 | **+0.12** / **+0.12** | **−0.12** / **−0.13** | **−0.09** / **−0.12** | **−0.05** / **−0.08** |
+| on Env+S+Leg | **+0.17** / **+0.15** | **−0.18** / **−0.15** | **−0.10** / **−0.14** | −0.02 [−0.05, 0.00] / **−0.08** |
+| on Env+S+Leg+L1 | **+0.10** / **+0.09** | **−0.11** / **−0.10** | **−0.07** [−0.09, −0.04] / **−0.09** | −0.02 [−0.05, 0.00] / **−0.06** [−0.08, −0.02] |
+
+- Per-split ranges are within ±0.01 of the average.
+- Every direction keeps its cycle-1 sign under every base at both sites,
+  and every CI excludes 0 except one case: **NEON cellulose once the
+  legacy is in the base** (−0.015 to −0.031 across splits; the CI
+  touches 0 under every split).
+- Lignin passes under all four bases at both sites (−0.066 [−0.093, −0.042]
+  and −0.089 [−0.112, −0.061] on the strictest).
+- NIRv recovery: every direction, cellulose included, passes under every
+  base at NEON (cellulose −0.041 on Env+S+Leg+L1).
+- A direction test that requires both lignin and cellulose beyond legacy
+  and Landsat would fail at NEON. One on lignin alone, or on Env+S+L1 (no
+  legacy), passes at both sites.
+
+**Transfer** (rank ρ with 1 km block-bootstrap CIs; the tuned learner):
+
+| Rank ρ, Env+S → Env+S+T | NEON, NDMI recovery | NEON, NIRv recovery | `sierra_nf`, NDMI recovery | `sierra_nf`, NIRv recovery |
+|---|---|---|---|---|
+| pooled | +0.26 → +0.27 | +0.34 → **+0.54** | +0.00 → **+0.12** | −0.22 → −0.16 |
+| elevation q1 | +0.25 → +0.31 | +0.10 → +0.27 | +0.16 → +0.15 | −0.10 → −0.13 |
+| q2 | −0.08 → −0.03 | −0.09 → +0.07 | +0.21 → +0.22 | −0.06 → −0.05 |
+| q3 | +0.24 → +0.34 | −0.09 → +0.06 | +0.24 → +0.37 | +0.00 → +0.08 |
+| q4 | +0.22 → +0.35 | −0.04 → +0.14 | +0.27 → **+0.51** | −0.12 → −0.05 |
+
+- At `sierra_nf` the §21 pattern reappears with the tuned learner and the
+  elevation-only cutpoints. NDMI recovery ranks at about 0 pooled and at
+  +0.16 to +0.27 within every quartile; the traits raise the upper two
+  quartiles to +0.37 and +0.51.
+- NIRv recovery does not transfer at `sierra_nf`, pooled or within
+  quartiles (as in §21).
+- At NEON the tuned learner transfers the environment better than the
+  default one (pooled NDMI recovery +0.26, against +0.20 in §11). Pooled,
+  the traits then add little for NDMI recovery (+0.27; §11: +0.20 → +0.33).
+  Within three of the four quartiles they still add +0.06 to +0.13.
+  NEON's second quartile ranks about 0 with or without traits.
+
+**Reading.** Under the averaged-over-splits rule, the pilot sites pass the
+skill part for every target: the 2018 traits add +0.021 to +0.034 beyond
+climate, structure and the first drought's legacy, and every split agrees.
+The directions keep their signs. Their size depends on the residual base:
+legacy or a Landsat scene each remove a quarter to
+two thirds of ρ on Env+S, and together more. Under the strictest base cellulose fails at NEON. The exact
+direction statistic therefore decides whether NEON would pass, and needs to
+be fixed before any held-out response is computed. Transfer rank skill
+within elevation strata reproduces §21 for NDMI recovery. It is a
+diagnostic (the transfer has no fitted cycle-2 baseline), not a pass/fail
+test.
+
 ## Summary
 
 1. **Coverage.**
@@ -2745,6 +2856,13 @@ For comparison, the pilot AOIs on the same definition: NEON 26,672 cells,
     are defined on the trait-mosaic footprints. Elevation quartile cutpoints
     for them and the Tahoe box are fixed in `config/heldout_strata.yml` from
     elevation alone.
+27. **The second-drought test, averaged over five fixed fold splits,
+    passes on the pilot sites** (§35). With the tuned learner, the 2018
+    traits add +0.021 to +0.034 beyond Env+S + legacy (NDMI and NIRv
+    recovery, NDMI resistance; both sites; every split agrees). N, LMA and
+    lignin keep their directions beyond legacy and the 2018 Landsat scene at
+    both sites. Cellulose does not beyond legacy at NEON. Within elevation
+    quartiles the `sierra_nf` transfer ranks NDMI recovery correctly (§21).
 
 ## Code
 
@@ -2759,8 +2877,10 @@ For comparison, the pilot AOIs on the same definition: NEON 26,672 cells,
 `fetch_lidar_structure.py`, `proto_lidar_validation.py`,
 `proto_trait_stability.py`, `fetch_wdts_cwc.py`, `fetch_wdts_traits.py`
 (`--date`, `--suffix`), `fetch_forest_type.py`,
-`proto_trait_directions.py` (`--group`, incl. `substrate`; `--trait-cells`/`--trait-source`),
-`proto_forward_pilot.py` (`--landsat`, `--landsat-composites`, `--tag`),
+`proto_trait_directions.py` (`--group`, incl. `substrate`; `--trait-cells`/`--trait-source`;
+`rho_within_splits`),
+`proto_forward_pilot.py` (`--landsat`, `--landsat-composites`, `--tag`,
+`--fold-seed`, `--rule` with `--rule-scene`, `--learner`, `--resid-learner`),
 `proto_transfer_diagnostics.py`,
 `proto_structure_from_spectra.py`, `proto_trait_diversity.py`,
 `proto_spaceborne_sim.py` (`refl` with `--year`, `simulate` with
