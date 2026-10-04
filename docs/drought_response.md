@@ -2692,6 +2692,90 @@ within elevation strata reproduces §21 for NDMI recovery. It is a
 diagnostic (the transfer has no fitted cycle-2 baseline), not a pass/fail
 test.
 
+### 36. Which small contrasts survive reassigning blocks to folds? (`hls_results/fold_robustness/`)
+
+The block bootstrap holds the five CV folds fixed. §31 showed that
+shuffling 1 km blocks into folds differently can move a single contrast by
+up to ±0.006, and §29's NEON control by 0.013, more than its CI shows. This
+section reruns the earlier contrasts that sit within about 0.015 of 0. Each
+gets three shuffled fold assignments (`--fold-seed` 1–3) beside the
+default, on the same cells. A contrast is called **robust** if its CI
+excludes 0, with the same sign, under all four assignments.
+`collect_fold_seeds.py` writes one table per family to
+`hls_results/fold_robustness/` (default / seed 1 / 2 / 3, range, robust).
+The large gains, such as traits over Env+S and recovery residual gains
+over lidar, were not rerun.
+
+Runs, on NEON and `sierra_nf`, 90 m:
+- `proto_spaceborne_only.py compare --no-stack` and `carbon`, NDMI
+  recovery;
+- `proto_trait_dynamics.py --interval d1513`;
+- `proto_forward_pilot.py` (main ladder);
+- `proto_structure_from_spectra.py`;
+- `proto_response_traits.py --structure` (NDMI resistance, resilience and
+  stress response) and `--neighbour` (NDMI resistance, recovery,
+  resilience and stress response).
+
+Each was run with `--fold-seed` and `--tag _fold<s>_<aoi>`.
+
+**Results** (ΔR² range over the four assignments; bold where robust):
+
+| Contrast (section) | NEON | `sierra_nf` |
+|---|---|---|
+| VSWIR − Landsat scene, date for date, EMIT-like (§23) | **+0.009 to +0.012** | **+0.008 to +0.012** |
+| same, 30 m (sbg_lo) / native | **+0.019 to +0.021** / **+0.022 to +0.025** | **+0.020 to +0.024** / **+0.032 to +0.035** |
+| EMIT-like − two Landsat composites (§23) | −0.003 to −0.005 (tie) | −0.002 to −0.005 (tie) |
+| structural carbon beyond the Landsat scene, EMIT-like / 30 m (§24) | **+0.009 to +0.010** / **+0.013 to +0.015** | **+0.005 to +0.009** / **+0.008 to +0.012** |
+| same, beyond Landsat-emulated structural carbon (§24) | **+0.006** / **+0.009 to +0.011** | −0.002 to −0.004 / −0.001 to +0.002 (n.s.) |
+| AVIRIS change on top of Env+S + Landsat change, NDMI recovery (§3) | **+0.006 to +0.008** | **+0.009 to +0.011** |
+| same, NDMI resilience / NIRv recovery / NIRv resilience | **+0.010 to +0.013** / **+0.009 to +0.012** / **+0.006 to +0.008** | **+0.007 to +0.010** / **+0.007 to +0.009** / **+0.006 to +0.007** |
+| same, lidar mortality fraction | +0.021 to +0.030 (CI touches 0) | – |
+| residual traits over lidar, NDMI resistance: 2013 trees / LVIS / ASO (§5) | +0.003 to +0.011 / **+0.013 to +0.017** / +0.005 to +0.010 (CI touches 0 under two) | ASO **+0.010 to +0.014** |
+| same, NDMI resilience | −0.004 to −0.010 / **+0.028 to +0.033** / **+0.015 to +0.018** | **+0.011 to +0.015** |
+| same, NDMI stress response | **+0.008 to +0.028** (CI touches 0 under three) / **+0.019 to +0.024** / **+0.016 to +0.024** | **+0.018 to +0.021** |
+| neighbour baseline B0: +Tres over Env+S+B0, resistance / recovery / resilience / stress response (§17) | **+0.010 to +0.012** / **+0.042 to +0.044** / **+0.036 to +0.040** / **+0.008 to +0.011** | **+0.030 to +0.035** / **+0.070 to +0.073** / **+0.041 to +0.044** / **+0.037 to +0.039** |
+| 2018 traits beyond legacy, cycle 2: NDMI recovery / resistance / resilience (§11) | **+0.025 to +0.035** / **+0.015 to +0.023** / **+0.014 to +0.025** | **+0.016 to +0.024** / **+0.013 to +0.020** / **+0.010 to +0.017** |
+| same, NIRv recovery / resistance / resilience | **+0.028 to +0.033** / **+0.014 to +0.021** / **+0.015 to +0.019** | **+0.026 to +0.030** / **+0.028 to +0.042** / **+0.038 to +0.041** |
+| skill kept without lidar, R²(Env+S+Ŝ+T) / R²(Env+S+L+T) (§15) | 0.94–1.01 (ASO 0.94–0.96, LVIS 0.95–1.01, 2013 trees 0.95–1.01) | ASO 0.92–0.96 |
+
+Notes on the table:
+- In the stress-response row the 2013-trees entry is not robust: the bold
+  marks only the LVIS and ASO entries.
+- Medians of the spread (max − min over the four assignments) per family:
+  - 0.002–0.003 for the head-to-head, structural-carbon and
+    trait-dynamics contrasts and the neighbour gains;
+  - 0.003–0.005 for the LVIS and ASO lidar checks;
+  - 0.006–0.008 for the cycle-2 gains, the no-lidar ladders and the
+    7,040-cell 2013-tree lidar check.
+
+  The largest spread among the quoted contrasts is 0.020: the stress
+  response over the 2013 trees.
+
+**Reading.**
+- **Robust:**
+  - the date-for-date VSWIR lead over a Landsat scene, at both areas and
+    for every configuration;
+  - the structural-carbon skill beyond the Landsat scene and composites;
+  - the AVIRIS-change add-on to Landsat change for every recovery and
+    resilience target;
+  - every neighbour-baseline gain;
+  - every cycle-2 gain of the 2018 traits beyond legacy;
+  - with LVIS and ASO, the residual-trait gains over lidar for resilience
+    and stress response, and for resistance except ASO at NEON;
+  - the no-lidar skill kept (0.92–1.01).
+- **Fold-sensitive:**
+  - NEON stress response over the 2013 lidar trees: +0.028 with the default
+    folds, +0.008 to +0.015 otherwise;
+  - NDMI resistance over ASO at NEON: +0.005 to +0.010;
+  - the trait-change gain for the lidar mortality fraction.
+
+  These were already the weakest entries of §5 and §3. The stress-response
+  and resistance gains over lidar rest on LVIS and on ASO at `sierra_nf`.
+- **Unchanged ties and nulls:** the EMIT-like vs two-composite tie, the
+  `sierra_nf` structural-carbon margin over Landsat-emulated carbon, and the
+  2013-tree resistance and resilience gains stay ties or nulls under every
+  assignment.
+
 ## Summary
 
 1. **Coverage.**
@@ -2863,16 +2947,30 @@ test.
     lignin keep their directions beyond legacy and the 2018 Landsat scene at
     both sites. Cellulose does not beyond legacy at NEON. Within elevation
     quartiles the `sierra_nf` transfer ranks NDMI recovery correctly (§21).
+28. **Most small contrasts survive reassigning blocks to folds** (§36).
+    Three shuffled fold assignments beside the default leave robust:
+    - the date-for-date VSWIR lead over a Landsat scene;
+    - the structural-carbon skill beyond Landsat;
+    - the AVIRIS-change add-on;
+    - every neighbour-baseline gain;
+    - every cycle-2 gain of the 2018 traits beyond legacy;
+    - the LVIS and ASO residual gains for resilience and stress response;
+    - the no-lidar skill kept (0.92–1.01).
+
+    Fold-sensitive: stress response over the 2013 lidar trees at NEON
+    (+0.008 to +0.028) and resistance over ASO at NEON (+0.005 to
+    +0.010).
 
 ## Code
 
 `fetch_landsat_c2_ee.py` (`--scene`), `fetch_disturbance_aois.py`, `aoi_env_layers.py` (`--masks-only`, `--disturbance-dir`),
-`fetch_heldout_masks.py`, `proto_heldout_strata.py`,
+`fetch_heldout_masks.py`, `proto_heldout_strata.py`, `collect_fold_seeds.py`,
 `query_airborne_coverage.py`,
-`response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`,
+`response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`
+(`--interval`, `--fold-seed`, `--tag`),
 `proto_response_traits.py` (`--structure`, `--ablation`, `--neighbour`,
 `--traits`/`--cwc`, `--trait-year`, `--line-z`, `--raw-block`,
-`--save-preds`, `--gains-only`),
+`--save-preds`, `--gains-only`, `--fold-seed`, `--tag`),
 `proto_response_transfer.py`, `query_lidar_coverage.py`,
 `fetch_lidar_structure.py`, `proto_lidar_validation.py`,
 `proto_trait_stability.py`, `fetch_wdts_cwc.py`, `fetch_wdts_traits.py`
@@ -2882,7 +2980,7 @@ test.
 `proto_forward_pilot.py` (`--landsat`, `--landsat-composites`, `--tag`,
 `--fold-seed`, `--rule` with `--rule-scene`, `--learner`, `--resid-learner`),
 `proto_transfer_diagnostics.py`,
-`proto_structure_from_spectra.py`, `proto_trait_diversity.py`,
+`proto_structure_from_spectra.py` (`--fold-seed`, `--tag`), `proto_trait_diversity.py`,
 `proto_spaceborne_sim.py` (`refl` with `--year`, `simulate` with
 `--l8`/`--seed`, `compare`), `proto_spaceborne_only.py` (`compare` with
 `--no-stack`, `carbon` with `--resid-landsat` and `--skip-ladder`; both

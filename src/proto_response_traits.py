@@ -476,10 +476,15 @@ def shap_summary(d, cols, target, max_n=20000):
 @click.option('--gains-only', is_flag=True,
               help='Ladder gains only: skip the conditional gains, residual '
                    'directions and SHAP')
+@click.option('--fold-seed', type=int, default=None,
+              help='Shuffle 1 km blocks into folds with this seed (default: '
+                   'the deterministic GroupKFold assignment)')
+@click.option('--tag', default='', help='Suffix of the output files')
 def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
          n_boot, structures, ablation, traits_path, cwc_path, trait_year,
          line_z, neighbour, neighbour_radius, raw_block_path, save_preds,
-         gains_only):
+         gains_only, fold_seed, tag):
+    rc.FOLD_SEED = fold_seed
     if (traits_path or cwc_path or raw_block_path) and len(aois) > 1:
         raise click.UsageError('--traits/--cwc/--raw-block take a single '
                                '--aoi')
@@ -498,8 +503,8 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
                                      scale_m)
                 for x in r:
                     x.update(aoi=aoi, scale_m=scale_m,
-                             radius_m=neighbour_radius)
-                f = outputdir / 'neighbour.csv'
+                             radius_m=neighbour_radius, fold_seed=fold_seed)
+                f = outputdir / f'neighbour{tag}.csv'
                 old = pd.read_csv(f) if f.exists() else pd.DataFrame()
                 if len(old):
                     old = old[~((old.aoi == aoi) & (old.scale_m == scale_m) &
@@ -520,7 +525,7 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
                                      paths)
                     for x in r:
                         x.update(aoi=aoi, scale_m=scale_m)
-                    f = outputdir / 'ablation.csv'
+                    f = outputdir / f'ablation{tag}.csv'
                     old = pd.read_csv(f) if f.exists() else pd.DataFrame()
                     if len(old):
                         old = old[~((old.aoi == aoi) &
@@ -539,10 +544,11 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
                     r = lidar_check(sub, src, targets, n_boot, pf)
                     if save_preds:
                         write_preds(pf, outputdir / f'preds_lidar_{src}_'
-                                    f'{aoi}_{scale_m}m.csv.gz')
+                                    f'{aoi}_{scale_m}m{tag}.csv.gz')
                     for x in r:
-                        x.update(aoi=aoi, scale_m=scale_m, check=src)
-                    f = outputdir / f'lidar_check_{src}.csv'
+                        x.update(aoi=aoi, scale_m=scale_m, check=src,
+                                 fold_seed=fold_seed)
+                    f = outputdir / f'lidar_check_{src}{tag}.csv'
                     old = (pd.read_csv(f) if f.exists() else pd.DataFrame())
                     if len(old):
                         old = old[~((old.aoi == aoi) &
@@ -555,7 +561,8 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
             R = residualize(d, T, 'block1000')
             d = pd.concat([d, R], axis=1)
             fs['Env+S+Tres'] = ENV + S_WALL + list(R.columns)
-            d.to_csv(outputdir / f'cells_{aoi}_{scale_m}m.csv', index=False)
+            d.to_csv(outputdir / f'cells_{aoi}_{scale_m}m{tag}.csv',
+                     index=False)
             click.echo(f'[{aoi} {scale_m} m] {len(d)} cells')
             pf = []
             for t in targets:
@@ -577,7 +584,7 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
                 if save_preds:
                     pf.append(pred_frame(sub, t, p))
                     write_preds(pf, outputdir / f'preds_ladder_{aoi}_'
-                                f'{scale_m}m.csv.gz')
+                                f'{scale_m}m{tag}.csv.gz')
                 gain = {f'{x["features"]}-{x["compare"]}': x for x in r
                         if x['compare'] and x['boot_blocks'] == 'block1000'}
                 base = [x for x in r if x['features'] == 'Env+S'
@@ -590,7 +597,8 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
 
                 if gains_only:
                     pd.DataFrame(rows).to_csv(
-                        outputdir / 'response_traits_ladder.csv', index=False)
+                        outputdir / f'response_traits_ladder{tag}.csv',
+                        index=False)
                     continue
 
                 # Conditional gains
@@ -638,10 +646,10 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
                                     cond_rows),
                                    ('response_traits_residual', res_rows),
                                    ('response_traits_shap', imp_rows)):
-                    pd.DataFrame(data).to_csv(outputdir / f'{name}.csv',
+                    pd.DataFrame(data).to_csv(outputdir / f'{name}{tag}.csv',
                                               index=False)
             fig_ladder(pd.DataFrame(rows), aoi, scale_m,
-                       outputdir / f'ladder_{aoi}_{scale_m}m.png')
+                       outputdir / f'ladder_{aoi}_{scale_m}m{tag}.png')
 
 
 def fig_ladder(r, aoi, scale_m, path):

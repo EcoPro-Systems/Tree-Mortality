@@ -203,15 +203,26 @@ def auc_oof(d, cols, target, blocks):
 @click.option('--scale', 'scales', multiple=True, type=int, default=[1, 3],
               show_default=True)
 @click.option('--n-boot', default=1000, show_default=True)
-def main(outputdir, aois, response_dir, scales, n_boot):
+@click.option('--interval', 'intervals', multiple=True,
+              help='Only these change intervals (e.g. d1513)')
+@click.option('--fold-seed', type=int, default=None,
+              help='Shuffle 1 km blocks into folds with this seed (default: '
+                   'the deterministic GroupKFold assignment)')
+@click.option('--tag', default='',
+              help='Suffix of the model output files; a tagged run leaves '
+                   'the cell tables and figures alone')
+def main(outputdir, aois, response_dir, scales, n_boot, intervals,
+         fold_seed, tag):
+    rc.FOLD_SEED = fold_seed
     outputdir.mkdir(parents=True, exist_ok=True)
     corr_rows, ladder_rows, auc_rows = [], [], []
     for aoi in aois:
         for k in scales:
             scale_m = rc.RES * k
             d = build(aoi, k, response_dir)
-            d.to_csv(outputdir / f'dynamics_{aoi}_{scale_m}m.csv',
-                     index=False)
+            if not tag:
+                d.to_csv(outputdir / f'dynamics_{aoi}_{scale_m}m.csv',
+                         index=False)
             click.echo(f'[{aoi} {scale_m} m] {len(d)} cells')
             yrs = {y: np.nanmedian(d[f'ewt_raw_{y}']) for y in AV_YEARS}
             click.echo('  median EWT: ' + ', '.join(
@@ -235,7 +246,7 @@ def main(outputdir, aois, response_dir, scales, n_boot):
                 corr_rows.append(dict(aoi=aoi, scale_m=scale_m, x=a, y=b,
                                       n=int(ok.sum()),
                                       rho=spearmanr(d[a][ok], d[b][ok])[0]))
-            if 'mort_frac' in d:
+            if 'mort_frac' in d and not tag:
                 fig_trajectories(d, outputdir /
                                  f'trajectories_{aoi}_{scale_m}m.png',
                                  f'{aoi} {scale_m} m')
@@ -247,10 +258,12 @@ def main(outputdir, aois, response_dir, scales, n_boot):
                 targets = ['mort_frac'] + targets
             base = ENV + S_WALL
             for a, b in INTERVALS:
-                tag = f'd{b % 100}{a % 100}'
-                L = [f'L_{v}_{tag}' for v in L_VARS]
-                A = [f'A_{t}_{tag}' for t in TRAITS + ['ewt', 'qcfc']]
-                Araw = [f'Araw_{t}_{tag}' for t in TRAITS + ['ewt']]
+                iv = f'd{b % 100}{a % 100}'
+                if intervals and iv not in intervals:
+                    continue
+                L = [f'L_{v}_{iv}' for v in L_VARS]
+                A = [f'A_{t}_{iv}' for t in TRAITS + ['ewt', 'qcfc']]
+                Araw = [f'Araw_{t}_{iv}' for t in TRAITS + ['ewt']]
                 fs = {'L': L, 'A': A, 'Araw': Araw, 'L+A': L + A,
                       'EnvS': base, 'EnvS+L': base + L,
                       'EnvS+A': base + A, 'EnvS+L+A': base + L + A}
@@ -264,13 +277,14 @@ def main(outputdir, aois, response_dir, scales, n_boot):
                                         n_boot=n_boot, pairs=cmp,
                                         extra_blocks=('block5000',))
                     for r in rows:
-                        r.update(aoi=aoi, scale_m=scale_m, interval=tag)
+                        r.update(aoi=aoi, scale_m=scale_m, interval=iv,
+                                 fold_seed=fold_seed)
                     ladder_rows += rows
                     msg = '  '.join(
                         f'{r["features"]}{"-" + r["compare"] if r["compare"] else ""} '
                         f'{r["r2"]:+.3f}' for r in rows
                         if r['boot_blocks'] == 'block1000')
-                    click.echo(f'  {tag} {t}: {msg}')
+                    click.echo(f'  {iv} {t}: {msg}')
                 # Recovery failure: bottom quintile of NDMI resilience
                 sub = d[d.ndmi_resilience.notna()].copy()
                 sub['fail'] = (sub.ndmi_resilience <=
@@ -278,15 +292,17 @@ def main(outputdir, aois, response_dir, scales, n_boot):
                 for name, cols in fs.items():
                     auc, _ = auc_oof(sub, cols, 'fail', 'block1000')
                     auc_rows.append(dict(aoi=aoi, scale_m=scale_m,
-                                         interval=tag, features=name,
+                                         interval=iv, fold_seed=fold_seed,
+                                         features=name,
                                          target='ndmi_resilience_q20',
                                          auc=auc))
-            pd.DataFrame(corr_rows).to_csv(outputdir / 'ewt_vs_landsat.csv',
-                                           index=False)
+            if not tag:
+                pd.DataFrame(corr_rows).to_csv(
+                    outputdir / 'ewt_vs_landsat.csv', index=False)
             pd.DataFrame(ladder_rows).to_csv(
-                outputdir / 'dynamics_ladder.csv', index=False)
-            pd.DataFrame(auc_rows).to_csv(outputdir / 'dynamics_auc.csv',
-                                          index=False)
+                outputdir / f'dynamics_ladder{tag}.csv', index=False)
+            pd.DataFrame(auc_rows).to_csv(
+                outputdir / f'dynamics_auc{tag}.csv', index=False)
 
 
 if __name__ == '__main__':
