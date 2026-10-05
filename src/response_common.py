@@ -5,6 +5,7 @@ scales, spatial-block CV with gradient boosting, paired block-bootstrap
 confidence intervals on R² differences, and residual semivariograms.
 """
 import copy
+import os
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -197,6 +198,22 @@ class BlockMLP:
 
 LEARNERS = ('hgb', 'hgb_tuned', 'mlp')
 
+# Worker processes for independent fits (pmap). Each worker runs its
+# OpenMP threads one at a time: on these small tables a fit is faster on
+# one thread than on many, and its result does not depend on the count.
+N_JOBS = int(os.environ.get('ECOPRO_JOBS', 1))
+
+
+def pmap(fn, kwargs_list, n_jobs=None):
+    """[fn(**kw) for kw in kwargs_list], over N_JOBS worker processes
+    (one OpenMP thread each) when N_JOBS > 1"""
+    n = N_JOBS if n_jobs is None else n_jobs
+    if n <= 1 or len(kwargs_list) <= 1:
+        return [fn(**kw) for kw in kwargs_list]
+    from joblib import Parallel, delayed, parallel_config
+    with parallel_config(backend='loky', inner_max_num_threads=1):
+        return Parallel(n_jobs=n)(delayed(fn)(**kw) for kw in kwargs_list)
+
 
 def make_model(learner='hgb', seed=0):
     """hgb: the default model of every experiment; hgb_tuned and mlp take
@@ -382,11 +399,14 @@ def ladder_splits(df, target, fsets, blocks, fold_seeds=FOLD_SEEDS,
     d = df[df[target].notna()]
     lr = learner if isinstance(learner, dict) else \
         {name: learner for name in fsets}
-    preds = {fs: {name: oof_predict(d, cols, target, blocks, weight, seed,
-                                    learner=lr.get(name, 'hgb'),
-                                    fold_seed=fs)
-                  for name, cols in fsets.items()}
-             for fs in fold_seeds}
+    jobs = [(fs, name) for fs in fold_seeds for name in fsets]
+    out = pmap(oof_predict, [dict(df=d, cols=fsets[name], target=target,
+                                  blocks=blocks, weight=weight, seed=seed,
+                                  learner=lr.get(name, 'hgb'), fold_seed=fs)
+                             for fs, name in jobs])
+    preds = {fs: {} for fs in fold_seeds}
+    for (fs, name), p in zip(jobs, out):
+        preds[fs][name] = p
     names = list(fsets)
     pairs = pairs or list(zip(names[:-1], names[1:]))
     w = None if weight is None else d[weight].values

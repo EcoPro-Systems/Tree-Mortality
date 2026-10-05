@@ -25,7 +25,7 @@ analysed the same way.
 | Landsat C2 L2 summer and June composites | `landsat_composites/<aoi>_<variant>_doy{182-273,145-190}.nc` | From `fetch_landsat_c2_ee.py` (Earth Engine). 2008–2025. Variants: `c2` (L5/7/8/9), `c2l7` (Landsat 7 only, to 2022), `c2oli` (Landsat 8/9 only) |
 | Env, terrain, structure, masks | `env/<aoi>_env.nc` | From `aoi_env_layers.py`. BCMv8 water-year CWD/AET/PET/PPT/Tmax and SPEI1–4 (2008–2024, nearest 270 m cell); local SRTM terrain indices (`topo/generated/`); GLAD height 2010, TCC 2010/2013, LANDFIRE 2014 EVH/EVC; NEON lidar tree summaries; NLCD 2013 forest; per-year fire (MTBS, CAL FIRE FRAP, CAL FIRE prescribed burns) and FACTS harvest/salvage, 2000–2025 |
 | Fire and harvest polygons | `fire/disturbance/{frap_fires,rx_fires,facts_harvest}.gpkg`; `fire/disturbance_heldout/` for the held-out grids | From `fetch_disturbance_aois.py`: CAL FIRE FRAP perimeters (all sizes), CAL FIRE prescribed-fire perimeters, USFS FACTS timber-harvest activities (EDW) |
-| Held-out site grids and masks | `config/heldout_aois.yml`; `env/{seki,yosemite_rest}_{env,mask}.nc`; `geom/seki_boundary.geojson` | From `fetch_heldout_masks.py` (2013 and 2018 trait-mosaic footprints, NPS SEQU/KICA boundary) and `aoi_env_layers.py --masks-only` (NLCD, terrain, fire and harvest only). Elevation strata: `config/heldout_strata.yml` (`proto_heldout_strata.py`) |
+| Held-out site grids and masks | `config/heldout_aois.yml`; `env/{seki,yosemite_rest}_{env,mask}.nc`; `geom/seki_boundary.geojson` | From `fetch_heldout_masks.py` (2013 and 2018 trait-mosaic footprints, NPS SEQU/KICA boundary) and `aoi_env_layers.py --masks-only` (NLCD, terrain, fire and harvest only). Elevation strata: `config/heldout_strata.yml` (`proto_heldout_strata.py`); candidate variants in `hls_results/heldout_variants/`. Forest type: `env/{seki,yosemite_rest}_ftype.nc` (`fetch_forest_type.py ../config/heldout_aois.yml`) |
 | AVIRIS flight-line inventory | `aviris_locator/AVIRIS-{C,NG}_flight_{table.csv,s.geojson}` | [ORNL DAAC 2140](https://doi.org/10.3334/ORNLDAAC/2140) flight tables (to Aug 2024) |
 | WDTS traits and canopy water | `wdts/<aoi>_traits.nc`, `wdts/<aoi>_cwc.nc` | As before. `fetch_wdts_cwc.py` now also saves `nadir_dist`. `stanislaus` traits (Tahoe box, UTM 11) are warped onto the UTM 10 AOI grid with nearest neighbour; no canopy water there yet |
 | Geology | `env/<aoi>_geology.nc`; source in `geology/` | From `fetch_geology.py`: USGS State Geologic Map Compilation, California (1:750,000), grouped into granitic, volcanic, metamorphic, surficial and other on the 30 m grids |
@@ -2776,6 +2776,184 @@ Notes on the table:
   2013-tree resistance and resilience gains stay ties or nulls under every
   assignment.
 
+### 37. A structural-carbon score under the averaged rule (`hls_results/forward_pilot_rule/`)
+
+In §35, lignin keeps its direction with cycle-2 recovery on every residual
+base at both pilot sites. Cellulose loses its CI at NEON once the
+cycle-1 legacy is in the base. A direction test on both traits would then
+depend on which trait is asked. This section adds one statistic for
+the pair: a structural-carbon score.
+
+**Score** (`proto_forward_pilot.py --rule --rule-directions-only`).
+- The mean of z-scored lignin and cellulose. On the residualized versions,
+  the z-scores are of the two residuals, separately for each base and fold
+  assignment. The expected sign is negative.
+- Its within-stratum ρ, the averaged-over-splits CI and the per-split rows
+  come from the same code and the same block draws as each trait in §35.
+- `--rule-directions-only` skips the skill and transfer parts. The
+  per-trait rows reproduce `rule_directions_*.csv` exactly (200 of 200
+  rows at each site).
+
+**Directions** (within-stratum ρ with cycle-2 recovery, average over the
+five splits, 95% CI):
+
+| Residual ρ of the score | NDMI recovery, NEON | NDMI recovery, `sierra_nf` | NIRv recovery, NEON | NIRv recovery, `sierra_nf` |
+|---|---|---|---|---|
+| standardized, not residualized | **−0.18** [−0.22, −0.14] | **−0.31** [−0.34, −0.27] | **−0.14** | **−0.09** |
+| on Env+S | **−0.12** [−0.15, −0.09] | **−0.21** [−0.23, −0.18] | **−0.11** | **−0.12** |
+| on Env+S+L1 | **−0.07** [−0.10, −0.05] | **−0.11** [−0.13, −0.07] | **−0.09** | **−0.08** |
+| on Env+S+Leg | **−0.07** [−0.09, −0.04] | **−0.12** [−0.14, −0.09] | **−0.08** | **−0.09** |
+| on Env+S+Leg+L1 | **−0.05** [−0.07, −0.02] | **−0.08** [−0.10, −0.05] | **−0.07** [−0.10, −0.05] | **−0.07** [−0.09, −0.04] |
+
+On the strictest base (Env+S+Leg+L1), NDMI recovery:
+
+| ρ (95% CI) | NEON | `sierra_nf` |
+|---|---|---|
+| lignin | −0.066 [−0.093, −0.042] | −0.089 [−0.112, −0.061] |
+| cellulose | −0.022 [−0.053, 0.003] | −0.055 [−0.081, −0.024] |
+| score | **−0.046** [−0.074, −0.019] | **−0.077** [−0.102, −0.047] |
+
+- **The score passes on every base at both sites, for both recovery
+  targets.** Every per-split CI excludes 0 as well. The weakest is NEON
+  NDMI recovery on the strictest base: per-split ρ −0.037 to −0.051, upper
+  bounds −0.009 to −0.024.
+- It sits between its two traits: weaker than lignin alone and stronger
+  than cellulose. At NEON the strictest-base margin from 0 (upper bound
+  −0.019) is smaller than lignin's (−0.042).
+
+**Reading.** As a single statistic for structural carbon, the score
+passes where cellulose alone fails, at NEON beyond legacy. It keeps both
+traits in the test. Lignin alone keeps the wider margin.
+
+### 38. Candidate definitions of the held-out remainder (`hls_results/heldout_variants/`)
+
+§34 left two questions about the Yosemite-box held-out sites.
+- `seki` is too small to test alone.
+- `yosemite_rest` reaches down into foothill woodland, below the mixed
+  conifer of the pilot sites.
+
+This section measures what pooling and restricting would do. It uses only
+elevation, forest type and the disturbance masks; no 2020–22 response of
+these areas is computed. The cutpoints in `config/heldout_strata.yml` are
+unchanged. The candidates are written to
+`hls_results/heldout_variants/strata_candidates.yml`.
+
+**Forest type.**
+- `fetch_forest_type.py` now also covers the two held-out grids (LANDFIRE
+  2014 EVT, the groups of §9).
+- `yosemite_rest` is 10% red fir, 8% mesic mixed conifer and 7% dry
+  pine/mixed conifer. Foothill pine woodland is 10%, chaparral 8% and oak
+  woodland 5%.
+- A cell counts as conifer if at least 50% of its valid pixels are in the
+  pine, mesic, red-fir or subalpine groups. Subalpine meadow is excluded.
+
+**Options** of `proto_heldout_strata.py`:
+- `--conifer`;
+- `--min-elevation` and `--max-elevation`;
+- `--pool` (add another area's cells);
+- `--key` (write under its own name).
+
+**Variants** (90 m cells of undisturbed NLCD forest, as in §34):
+
+| Variant | Cells | Cutpoints (m) | Elevation range (m) |
+|---|---|---|---|
+| `yosemite_rest` (as fixed in §34) | 361,464 | 966 / 2,334 / 2,718 | 181–3,700 |
+| + `seki` | 361,853 | 966 / 2,333 / 2,718 | 181–3,700 |
+| conifer | 234,713 | 2,244 / 2,591 / 2,813 | 346–3,597 |
+| conifer + `seki` | 235,057 | 2,242 / 2,591 / 2,813 | 346–3,597 |
+| floor 1,178 m (NEON's lowest cutpoint) | 252,675 | 2,271 / 2,590 / 2,810 | 1,178–3,700 |
+| conifer + floor 1,178 m | 225,302 | 2,308 / 2,610 / 2,822 | 1,178–3,597 |
+| conifer + ceiling 3,042 m (NEON's highest cell) | 223,346 | 2,211 / 2,566 / 2,783 | 346–3,042 |
+| conifer + floor + ceiling | 213,935 | 2,285 / 2,587 / 2,792 | 1,178–3,042 |
+| `seki`, conifer | 344 | 1,915 / 2,008 / 2,247 | 1,692–2,357 |
+
+The same conifer filter on the other areas (undisturbed forest cells):
+
+| Area | All | Conifer | Kept | Conifer cutpoints (m) |
+|---|---|---|---|---|
+| NEON | 26,672 | 18,856 | 71% | 1,766 / 2,163 / 2,425 |
+| `sierra_nf` | 20,809 | 18,777 | 90% | 1,832 / 2,173 / 2,403 |
+| `stanislaus` (Tahoe box) | 52,456 | 49,442 | 94% | 1,738 / 1,977 / 2,181 |
+
+- **Pooling `seki` changes nothing that matters.** It adds 389 cells (344
+  conifer) and moves no cutpoint by more than 2 m.
+- **Most of the foothill cells go with either restriction.** A conifer
+  filter and a floor at 1,178 m each remove about a third of
+  `yosemite_rest`. Each raises the lowest cutpoint from 966 m to about
+  2,250 m.
+- **The remainder is mostly higher than the pilot sites, even restricted.**
+  - The conifer `yosemite_rest` cells have a median of 2,591 m. The
+    conifer cells of NEON and `sierra_nf` have medians of 2,163 and
+    2,173 m.
+  - 65% (NEON) and 66% (`sierra_nf`) of the conifer remainder lie above
+    the pilot sites' upper conifer cutpoint (2,425 / 2,403 m). Only 5%
+    and 12% lie above their highest cell.
+  - So the remainder is mostly upper montane and subalpine forest (red fir
+    and lodgepole pine), where the pilots are mostly mixed conifer. A
+    ceiling at the pilots' highest cell trims only 11,367 cells.
+- **The filter would not touch the pilot sites equally.** It drops 29% of
+  NEON's cells but 10% of `sierra_nf`'s and 6% of the Tahoe box's. A
+  conifer-only definition of the held-out sites therefore needs the dry
+  run of §35 repeated on conifer pilot cells
+  (`proto_forward_pilot.py --rule --conifer-only`; below).
+
+**The §35 rule on conifer pilot cells** (`--rule --conifer-only`;
+elevation strata recomputed from the conifer cells; files
+`rule_*_conifer_<aoi>.csv`). NEON keeps 18,643 cells and `sierra_nf`
+18,317.
+
+| ΔR², average over five splits (95% CI) | All cells | Conifer cells |
+|---|---|---|
+| +Leg over Env+S, NEON, NDMI recovery | +0.072 | +0.061 [0.048, 0.076] |
+| **+T18 over Env+S+Leg, NEON**: NDMI recovery / NIRv recovery / NDMI resistance | +0.032 / +0.034 / +0.024 | **+0.037** [0.024, 0.055] / **+0.034** / **+0.040** |
+| +Leg over Env+S, `sierra_nf`, NDMI recovery | +0.157 | +0.149 [0.128, 0.172] |
+| **+T18 over Env+S+Leg, `sierra_nf`**: NDMI recovery / NIRv recovery / NDMI resistance | +0.021 / +0.029 / +0.022 | **+0.026** [0.019, 0.034] / **+0.031** / **+0.020** |
+
+| Residual ρ on Env+S+Leg+L1, NDMI recovery | All cells, NEON / `sierra_nf` | Conifer cells, NEON / `sierra_nf` |
+|---|---|---|
+| nitrogen | **+0.10** / **+0.09** | **+0.10** / **+0.09** |
+| LMA | **−0.11** / **−0.10** | **−0.11** / **−0.09** |
+| lignin | **−0.07** / **−0.09** | **−0.09** / **−0.09** |
+| cellulose | −0.02 [−0.05, 0.00] / **−0.06** | **−0.05** [−0.08, −0.02] / **−0.06** |
+| score (§37) | **−0.05** / **−0.08** | **−0.07** / **−0.08** |
+
+- **On conifer cells every direction passes on every base at both
+  sites**, for NDMI and NIRv recovery. That includes NEON cellulose beyond
+  legacy, which fails on all cells. The cells that the filter removes at
+  NEON (oak and foothill pine woodland, chaparral and riparian, 29%) are
+  where cellulose loses its direction.
+- The skill part passes as before. The 2018 traits add +0.020 to +0.040
+  beyond legacy, every split agreeing, as much as on all cells or more.
+- **Transfer** (rank ρ of NDMI recovery, Env+S → Env+S+T):
+  - NEON pooled goes from +0.26 → +0.27 on all cells to −0.09 → +0.09 on
+    conifer cells.
+  - Within the conifer quartiles NEON gives −0.05 → +0.04, +0.16 → +0.34,
+    +0.27 → +0.43 and +0.38 → +0.52.
+  - `sierra_nf` pooled goes from +0.00 → +0.12 to −0.11 → +0.05.
+  - Within its quartiles `sierra_nf` gives +0.25 → +0.13, +0.16 → +0.22,
+    +0.20 → +0.37 and +0.30 → +0.46.
+  - As in §21 and §35, the transfer ranks within elevation bands better
+    than pooled. On conifer cells the traits raise every quartile except
+    the lowest.
+
+**Computation.** Independent fits (fold assignments × feature sets in
+`ladder_splits`, and the trait residuals of `--rule`) now run in worker
+processes, `response_common.pmap`, when `ECOPRO_JOBS` > 1. Each worker
+uses one OpenMP thread. On tables of this size a gradient-boosting fit is
+faster on one thread than on ten, and gives the same predictions.
+Parallel and serial runs give identical ladders, predictions and
+residuals; the first NEON conifer contrasts match a serial run digit for
+digit. A full `--rule` run on one site takes about 15 minutes with eight
+workers, against 3–3.5 hours before.
+
+**Reading.**
+- Restricting the held-out remainder to conifer removes its foothill
+  woodland and costs the pilot test nothing.
+- On conifer cells the pilots pass every part of the rule. That includes
+  both structural-carbon traits beyond legacy and the Landsat scene.
+- What a restriction does not change is that the remainder sits higher
+  than the pilots: two thirds above their upper conifer quartile.
+
 ## Summary
 
 1. **Coverage.**
@@ -2960,11 +3138,27 @@ Notes on the table:
     Fold-sensitive: stress response over the 2013 lidar trees at NEON
     (+0.008 to +0.028) and resistance over ASO at NEON (+0.005 to
     +0.010).
+29. **A structural-carbon score passes where cellulose alone does not**
+    (§37). The mean of z-scored lignin and cellulose keeps its negative
+    direction with cycle-2 recovery on every residual base at both pilot
+    sites, for NDMI and NIRv recovery, under every split. Beyond legacy and
+    the 2018 Landsat scene, NDMI recovery gives −0.046 [−0.074, −0.019]
+    (NEON) and −0.077 (`sierra_nf`). Lignin alone gives −0.066 and −0.089.
+30. **Candidate definitions of the held-out remainder** (§38).
+    - Pooling `seki` changes no cutpoint by more than 2 m.
+    - A conifer filter or a 1,178 m floor removes about a third of
+      `yosemite_rest` (the foothill woodland).
+    - Either way, two thirds of what remains lies above the pilot sites'
+      upper elevation quartile.
+    - On conifer pilot cells (29% fewer at NEON) the rule passes every part
+      at both sites. That includes NEON cellulose beyond legacy (−0.05),
+      which fails on all cells.
 
 ## Code
 
 `fetch_landsat_c2_ee.py` (`--scene`), `fetch_disturbance_aois.py`, `aoi_env_layers.py` (`--masks-only`, `--disturbance-dir`),
-`fetch_heldout_masks.py`, `proto_heldout_strata.py`, `collect_fold_seeds.py`,
+`fetch_heldout_masks.py`, `proto_heldout_strata.py` (`--conifer`,
+`--min-elevation`, `--max-elevation`, `--pool`, `--key`), `collect_fold_seeds.py`,
 `query_airborne_coverage.py`,
 `response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`
 (`--interval`, `--fold-seed`, `--tag`),
@@ -2978,7 +3172,9 @@ Notes on the table:
 `proto_trait_directions.py` (`--group`, incl. `substrate`; `--trait-cells`/`--trait-source`;
 `rho_within_splits`),
 `proto_forward_pilot.py` (`--landsat`, `--landsat-composites`, `--tag`,
-`--fold-seed`, `--rule` with `--rule-scene`, `--learner`, `--resid-learner`),
+`--fold-seed`, `--rule` with `--rule-scene`, `--learner`, `--resid-learner`,
+`--rule-directions-only`, `--conifer-only`; `ECOPRO_JOBS` worker processes
+via `response_common.pmap`),
 `proto_transfer_diagnostics.py`,
 `proto_structure_from_spectra.py` (`--fold-seed`, `--tag`), `proto_trait_diversity.py`,
 `proto_spaceborne_sim.py` (`refl` with `--year`, `simulate` with
