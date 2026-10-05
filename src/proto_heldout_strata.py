@@ -20,11 +20,19 @@ is committed with the code (config/heldout_strata.yml).
     python proto_heldout_strata.py ../config/heldout_strata.yml \
         -a stanislaus -a seki -a yosemite_rest
 
+The held-out sites are tested on their conifer cells (test_cells: the
+definition in config/heldout_aois.yml, fixed in §39), and the committed
+cutpoints are those of the conifer cells:
+
+    python proto_heldout_strata.py ../config/heldout_strata.yml \
+        -a stanislaus -a yosemite_rest --conifer
+
 Candidate definitions of an area, written under their own key (--key) to a
 separate file so the committed cutpoints stay as they are:
   --conifer        only cells that are >= 50% conifer on their valid pixels
                    (LANDFIRE 2014 EVT, fetch_forest_type.py: the pine,
-                   mesic, red-fir and subalpine groups, without meadows)
+                   mesic, red-fir and subalpine groups, without meadows;
+                   config/heldout_aois.yml test_cells)
   --min-elevation  only cells at or above this mean elevation (m)
   --max-elevation  only cells below this mean elevation (m)
   --pool AOI       add another area's cells (with the same filters)
@@ -44,7 +52,20 @@ import response_common as rc
 
 N_STRATA = 4
 LAST_YEAR = 2025
-CONIFER = ('pine', 'mesic', 'red_fir', 'subalpine')
+HELDOUT_CONFIG = (Path(__file__).resolve().parent.parent /
+                  'config/heldout_aois.yml')
+
+
+def test_definition(configfile=HELDOUT_CONFIG):
+    """The cells on which the held-out sites are tested (test_cells of
+    config/heldout_aois.yml)"""
+    with open(configfile) as f:
+        return yaml.safe_load(f)['test_cells']
+
+
+_TEST = test_definition()
+CONIFER = tuple(_TEST['conifer_groups'])
+MIN_CONIFER = float(_TEST['min_conifer_share'])
 
 
 def aoi_mask(aoi):
@@ -55,14 +76,20 @@ def aoi_mask(aoi):
     return xr.open_dataset(path)['keep'].values.astype(bool)
 
 
-def conifer_pixels(aoi):
-    """Per pixel: True where the LANDFIRE 2014 EVT class is conifer forest
-    or woodland (CONIFER groups of fetch_forest_type.py, without meadows)"""
+def group_pixels(aoi, groups):
+    """Per pixel: True where the LANDFIRE 2014 EVT class is in one of these
+    groups of fetch_forest_type.py (meadows excluded)"""
     f = xr.open_dataset(rc.E / 'env' / f'{aoi}_ftype.nc')
     codes = [int(c) for c, g, nm in (r.split('|', 2) for r in
                                       f.attrs['evt_table'].split('; '))
-             if g in CONIFER and 'Meadow' not in nm]
+             if g in groups and 'Meadow' not in nm]
     return np.isin(f.lf14_evt.values, codes)
+
+
+def conifer_pixels(aoi):
+    """Per pixel: True where the EVT class is conifer forest or woodland
+    (the CONIFER groups)"""
+    return group_pixels(aoi, CONIFER)
 
 
 def elevation_cells(aoi, k=3, last_year=LAST_YEAR, conifer=False,
@@ -79,12 +106,18 @@ def elevation_cells(aoi, k=3, last_year=LAST_YEAR, conifer=False,
         layers['conifer'] = conifer_pixels(aoi).astype(np.float32)
     d = rc.cell_table(layers, valid, k)
     if conifer:
-        d = d[d.conifer >= 0.5]
+        d = d[d.conifer >= MIN_CONIFER]
     if min_elevation is not None:
         d = d[d.elevation >= min_elevation]
     if max_elevation is not None:
         d = d[d.elevation < max_elevation]
     return d
+
+
+def test_cells(aoi, k=3):
+    """The cells (cell_row, cell_col) on which a held-out site is tested:
+    its undisturbed forest cells that are >= MIN_CONIFER conifer"""
+    return elevation_cells(aoi, k, conifer=True)[['cell_row', 'cell_col']]
 
 
 def elevation_cutpoints(elev, n=N_STRATA):
@@ -122,7 +155,8 @@ def main(outputfile, aois, scale, conifer, min_elevation, max_elevation,
     out = {'description': (
         f'Elevation quartile cutpoints (m) of {rc.RES * scale} m cells of '
         f'NLCD 2013 forest with no fire or harvest through {LAST_YEAR} '
-        f'(>= {rc.MIN_VALID:.0%} of the cell valid); elevation only, '
+        f'(>= {rc.MIN_VALID:.0%} of the cell valid; areas with a definition '
+        f'are restricted as it states); elevation only, '
         f'computed before any 2020-22 response of these areas'),
         'computed': date.today().isoformat(), 'scale_m': rc.RES * scale,
         'areas': {}}

@@ -1,23 +1,32 @@
 description: Elevation quartile cutpoints (m) of 90 m cells of NLCD 2013 forest with
-  no fire or harvest through 2025 (>= 70% of the cell valid); elevation only, computed
-  before any 2020-22 response of these areas
-computed: '2026-10-03'
+  no fire or harvest through 2025 (>= 70% of the cell valid; areas with a definition
+  are restricted as it states); elevation only, computed before any 2020-22 response
+  of these areas
+computed: '2026-10-04'
 scale_m: 90
 areas:
   stanislaus:
-    cells: 52456
+    cells: 49442
     cutpoints_m:
-    - 1732.5
-    - 1976.0
-    - 2178.3
+    - 1737.7
+    - 1977.1
+    - 2180.5
     cells_per_stratum:
-    - 13114
-    - 13114
-    - 13114
-    - 13114
+    - 12361
+    - 12360
+    - 12360
+    - 12361
     elevation_range_m:
-    - 930.6
+    - 936.9
     - 2748.5
+    definition:
+      areas:
+      - stanislaus
+      conifer: true
+      min_elevation_m: null
+      max_elevation_m: null
+      cells_per_area:
+      - 49442
   seki:
     cells: 389
     cutpoints_m:
@@ -33,16 +42,24 @@ areas:
     - 1692.0
     - 2356.6
   yosemite_rest:
-    cells: 361464
+    cells: 234713
     cutpoints_m:
-    - 965.5
-    - 2334.0
-    - 2717.9
+    - 2244.3
+    - 2591.4
+    - 2813.4
     cells_per_stratum:
-    - 90366
-    - 90366
-    - 90366
-    - 90366
+    - 58678
+    - 58678
+    - 58678
+    - 58679
     elevation_range_m:
-    - 181.2
-    - 3700.2
+    - 346.2
+    - 3596.7
+    definition:
+      areas:
+      - yosemite_rest
+      conifer: true
+      min_elevation_m: null
+      max_elevation_m: null
+      cells_per_area:
+      - 234713

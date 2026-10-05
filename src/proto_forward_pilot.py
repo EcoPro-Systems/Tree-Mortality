@@ -69,7 +69,8 @@ is the paired 1 km block-bootstrap CI of that average
 Outputs rule_ladder.csv, rule_directions.csv and rule_transfer.csv
 (--rule-directions-only: the directions alone). --conifer-only runs it on
 the cells that are >= 50% conifer (LANDFIRE 2014 EVT), with elevation
-strata from those cells: a candidate definition of the held-out sites.
+strata from those cells: the definition on which the held-out sites are
+tested (proto_heldout_strata.test_cells, fixed in §39).
 
 Held-out AOIs (response_common.HELD_OUT) are refused.
 
@@ -122,8 +123,8 @@ def build(aoi, k, rank, conifer=False):
     c2 = build_cycle(aoi, k, 2, valid)
     key = ['cell_row', 'cell_col']
     if conifer:
-        from proto_heldout_strata import elevation_cells
-        keep = elevation_cells(aoi, k, conifer=True)[key]
+        from proto_heldout_strata import test_cells
+        keep = test_cells(aoi, k)
         c1, c2 = c1.merge(keep, on=key), c2.merge(keep, on=key)
     leg = c1[key + TARGETS].rename(columns={t: f'leg_{t}' for t in TARGETS})
     c1r = c1[key + ['block1000'] + TARGETS + ENV + S_WALL]

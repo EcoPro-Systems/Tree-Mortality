@@ -37,10 +37,17 @@ GLOBAL = 'global'  # fold_seed default: use the module's FOLD_SEED
 # AOIs held out for the 2020-22 drought: their cycle-2 responses stay
 # unexamined until models fixed on the other AOIs are applied to them
 HELD_OUT = {'stanislaus', 'seki', 'yosemite_rest'}
+# held out but never tested (too few cells; config/heldout_aois.yml
+# tested: false): their cycle-2 responses are not built at all
+NOT_TESTED = {'seki'}
 
 
 def check_cycle2(aoi, allow=False):
-    """Refuse to build 2020-22 responses for a held-out AOI"""
+    """Refuse to build 2020-22 responses for a held-out AOI (for one that
+    is not tested, even with allow)"""
+    if aoi in NOT_TESTED:
+        raise RuntimeError(f'{aoi} is held out and not tested; its 2020-22 '
+                           'responses are never computed')
     if aoi in HELD_OUT and not allow:
         raise RuntimeError(f'{aoi} is held out for the 2020-22 drought; '
                            'its cycle-2 responses are not computed')

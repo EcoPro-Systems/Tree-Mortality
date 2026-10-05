@@ -2954,6 +2954,46 @@ workers, against 3–3.5 hours before.
 - What a restriction does not change is that the remainder sits higher
   than the pilots: two thirds above their upper conifer quartile.
 
+### 39. The held-out test cells, fixed (`config/heldout_aois.yml`, `config/heldout_strata.yml`)
+
+The held-out sites are tested on their **conifer cells**, the variant of
+§38. This section fixes that definition in the configuration and the code,
+before any 2020–22 response of these sites exists. Nothing here computes a
+response.
+
+**Definition** (`test_cells` in `config/heldout_aois.yml`).
+- 90 m cells (≥ 70% valid) of NLCD 2013 forest with no fire or harvest
+  through 2025, inside the site mask, as in §34.
+- At least 50% of the cell's valid pixels in the pine, mesic, red-fir or
+  subalpine groups of LANDFIRE 2014 EVT (`fetch_forest_type.py`), meadows
+  excluded.
+- `proto_heldout_strata.py` reads the groups and the threshold from the
+  configuration. `--conifer`, `proto_forward_pilot.py --conifer-only` and
+  the cycle-2 builder all use the same cells
+  (`proto_heldout_strata.test_cells`).
+
+**Sites and elevation strata** (`config/heldout_strata.yml`, recomputed
+from the conifer cells; they match §38):
+
+| Site | Cells | Cutpoints (m) | Elevation range (m) |
+|---|---|---|---|
+| `stanislaus` (Tahoe box) | 49,442 | 1,738 / 1,977 / 2,181 | 937–2,749 |
+| `yosemite_rest` | 234,713 | 2,244 / 2,591 / 2,813 | 346–3,597 |
+
+- **`seki` is not tested.** It keeps 389 cells (§34), and pooling it with
+  `yosemite_rest` moves no cutpoint by more than 2 m (§38). It stays in
+  `response_common.HELD_OUT`, and `response_common.NOT_TESTED` makes the
+  cycle-2 builder refuse it even when held-out sites are allowed. Its
+  2020–22 responses are never computed. Its all-cell cutpoints stay in the
+  strata file for reference.
+- **The cycle-2 builder keeps only the test cells.** With
+  `allow_held_out`, `proto_response_transfer.build_cycle` restricts a
+  held-out site's 2020–22 table to `test_cells`. A held-out cycle-2 table
+  therefore cannot contain any other cell. Cycle 1, which the Tahoe-box
+  work uses, is unchanged.
+- The pilot sites keep the same conifer cells as in §38 (NEON 18,684 before
+  the Landsat-scene filter, 18,643 after).
+
 ## Summary
 
 1. **Coverage.**
@@ -3153,12 +3193,15 @@ workers, against 3–3.5 hours before.
     - On conifer pilot cells (29% fewer at NEON) the rule passes every part
       at both sites. That includes NEON cellulose beyond legacy (−0.05),
       which fails on all cells.
+31. **The held-out test cells are fixed** (§39): the conifer cells of
+    `stanislaus` (49,442) and `yosemite_rest` (234,713), with their
+    elevation cutpoints; `seki` stays held out and is not tested.
 
 ## Code
 
 `fetch_landsat_c2_ee.py` (`--scene`), `fetch_disturbance_aois.py`, `aoi_env_layers.py` (`--masks-only`, `--disturbance-dir`),
 `fetch_heldout_masks.py`, `proto_heldout_strata.py` (`--conifer`,
-`--min-elevation`, `--max-elevation`, `--pool`, `--key`), `collect_fold_seeds.py`,
+`--min-elevation`, `--max-elevation`, `--pool`, `--key`; `test_cells`), `collect_fold_seeds.py`,
 `query_airborne_coverage.py`,
 `response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`
 (`--interval`, `--fold-seed`, `--tag`),

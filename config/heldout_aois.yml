@@ -3,6 +3,16 @@
 # these large grids. Each grid is a bounding box on the 30 m UTM 11 lattice
 # of the trait mosaics; the site itself is the cell mask in
 # env/<aoi>_mask.nc (fetch_heldout_masks.py).
+#
+# Cells on which the held-out sites are tested, fixed before any of their
+# 2020-22 responses exist (docs/drought_response.md §39): 90 m cells with
+# >= min_conifer_share of their valid pixels in these LANDFIRE 2014 EVT
+# groups (fetch_forest_type.py; meadows excluded). Their elevation cutpoints
+# are in heldout_strata.yml. An area with tested: false stays held out
+# (response_common.NOT_TESTED) and is never tested.
+test_cells:
+  conifer_groups: [pine, mesic, red_fir, subalpine]
+  min_conifer_share: 0.5
 aois:
   yosemite_rest:
     # the whole 2013 Yosemite-box trait mosaic extent; the mask keeps the
@@ -13,10 +23,12 @@ aois:
     epsg: 32611
   seki:
     # the part of Sequoia and Kings Canyon NPs inside the Yosemite-box
-    # footprint (western Kings Canyon, Grant Grove), with ~1 km margin
+    # footprint (western Kings Canyon, Grant Grove), with ~1 km margin;
+    # 389 undisturbed forest cells, too few to test
     center: [-118.91017, 36.78298]
     size_m: [15300, 31000]
     epsg: 32611
+    tested: false
 
 size_m: 30000
 resolution: 30
