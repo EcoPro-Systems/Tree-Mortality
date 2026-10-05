@@ -70,7 +70,11 @@ Outputs rule_ladder.csv, rule_directions.csv and rule_transfer.csv
 (--rule-directions-only: the directions alone). --conifer-only runs it on
 the cells that are >= 50% conifer (LANDFIRE 2014 EVT), with elevation
 strata from those cells: the definition on which the held-out sites are
-tested (proto_heldout_strata.test_cells, fixed in §39).
+tested (proto_heldout_strata.test_cells, fixed in §39). --rule-subset adds
+direction rows on part of the cells (upper: the AOI's upper elevation
+quartile; highfir: >= 50% red fir and subalpine EVT), with the residuals
+still fitted on all of them; --rule-pool pools the directions over the
+AOIs (strata and 1 km blocks kept apart by AOI).
 
 Held-out AOIs (response_common.HELD_OUT) are refused.
 
@@ -249,6 +253,9 @@ def landsat_control(d, aoi, k, scenes, composites, n_boot, dir_boot):
 
 RULE_TRAITS = {'Nitrogen': 1, 'LMA': -1, 'Lignin': -1, 'Cellulose': -1}
 SCORE, SCORE_OF = 'StructC', ('Lignin', 'Cellulose')
+# --rule-subset: 'upper' (the AOI's upper elevation quartile) or cells
+# >= 50% in these LANDFIRE 2014 EVT groups
+SUBSETS = {'upper': None, 'highfir': ('red_fir', 'subalpine')}
 
 
 def zmean(d, cols):
@@ -256,16 +263,58 @@ def zmean(d, cols):
     return sum((d[c] - d[c].mean()) / d[c].std() for c in cols) / len(cols)
 
 
+def direction_rows(dd, t, strata, rcols, bases, fold_seeds, dir_boot,
+                   signs, mask=None, **tags):
+    """Within-stratum ρ with target t of each 2018 trait, as standardized
+    and residualized on each base (averaged over the fold assignments),
+    optionally on a subset of the cells (mask)"""
+    from proto_trait_directions import rho_within_boot, rho_within_splits
+    if mask is not None:
+        dd, strata = dd[mask], strata[mask]
+    rows = []
+    for x, sign in signs.items():
+        col = f'T_{x}_18'
+        u = rc.within_strata_rho(dd, [col], t, strata)[0]
+        lo, hi = rho_within_boot(dd, col, t, strata, dd.block1000, dir_boot)
+        rows.append(dict(target=t, trait=x, residual_on='none',
+                         expected_sign=sign, fold_seed='none',
+                         rho_within=u['rho_within'], lo=lo, hi=hi,
+                         n=u['n'], n_strata=u['n_strata'], **tags))
+        for bn in bases:
+            cols = [rcols[(x, bn, f)] for f in fold_seeds]
+            v = rho_within_splits(dd, cols, t, strata, dd.block1000,
+                                  dir_boot)
+            rows.append(dict(target=t, trait=x, residual_on=bn,
+                             expected_sign=sign, fold_seed='mean',
+                             rho_within=v['rho_within'], lo=v['lo'],
+                             hi=v['hi'], n=u['n'], n_strata=u['n_strata'],
+                             **tags))
+            for f, (est, lo, hi) in zip(fold_seeds, v['per_split']):
+                rows.append(dict(target=t, trait=x, residual_on=bn,
+                                 expected_sign=sign, fold_seed=f,
+                                 rho_within=est, lo=lo, hi=hi, n=u['n'],
+                                 n_strata=u['n_strata'], **tags))
+    for bn in ['none'] + list(bases):
+        click.echo(f'    directions {tags.get("subset", "all"):7s}| '
+                   f'{bn:13s} ' + '  '.join(
+                       f'{y["trait"][:4]} {y["rho_within"]:+.2f} '
+                       f'[{y["lo"]:+.2f},{y["hi"]:+.2f}]' for y in rows
+                       if y['residual_on'] == bn
+                       and y['fold_seed'] in ('mean', 'none')))
+    return rows
+
+
 def rule_check(d, c1, aoi, k, targets, scene, fold_seeds, n_boot, dir_boot,
                learner, resid_learner, directions_only=False,
-               conifer=False):
+               conifer=False, subsets=()):
     """The averaged-over-splits rule on one AOI; returns (ladder rows,
-    direction rows, transfer rows). directions_only skips the skill and
-    transfer parts."""
+    direction rows, transfer rows, pool). directions_only skips the skill
+    and transfer parts. subsets (SUBSETS names) adds direction rows on
+    those cells, with the residuals fitted on all cells; pool holds what
+    pooling the directions over AOIs needs."""
     from scipy.stats import spearmanr
-    from proto_trait_directions import rho_within_boot, rho_within_splits
     from proto_heldout_strata import (elevation_cells, elevation_cutpoints,
-                                      elevation_stratum)
+                                      elevation_stratum, group_share)
     n0 = len(d)
     d, lb = landsat_cols(d, aoi, k, [scene], False)
     click.echo(f'[{aoi}] rule: {len(d)} of {n0} cells with {scene}; '
@@ -302,6 +351,18 @@ def rule_check(d, c1, aoi, k, targets, scene, fold_seeds, n_boot, dir_boot,
     directions = dict(RULE_TRAITS, **{SCORE: -1})
     cuts = elevation_cutpoints(
         elevation_cells(aoi, k, conifer=conifer).elevation.values)
+    masks = {'all': np.ones(len(dd), bool)}
+    for name in subsets:
+        if name == 'upper':  # the AOI's upper elevation quartile
+            masks[name] = (elevation_stratum(dd.elevation.values, cuts)
+                           == len(cuts))
+        else:  # >= 50% of the cell in these EVT groups
+            g = group_share(aoi, SUBSETS[name], k)
+            share = dd[['cell_row', 'cell_col']].merge(
+                g, on=['cell_row', 'cell_col'], how='left').share.values
+            masks[name] = share >= 0.5
+        click.echo(f'  subset {name}: {masks[name].sum()} cells' + (
+            f' (elevation >= {cuts[-1]:.0f} m)' if name == 'upper' else ''))
     lrows, drows, trows = [], [], []
     for t in targets:
         sub = d[d[t].notna() & np.isfinite(d[t])]
@@ -320,34 +381,10 @@ def rule_check(d, c1, aoi, k, targets, scene, fold_seeds, n_boot, dir_boot,
                            f'  splits {min(per):+.3f} to {max(per):+.3f}')
         if not t.endswith('recovery'):
             continue
-        for x, sign in directions.items():
-            col = f'T_{x}_18'
-            u = rc.within_strata_rho(dd, [col], t, strata)[0]
-            lo, hi = rho_within_boot(dd, col, t, strata, dd.block1000,
-                                     dir_boot)
-            drows.append(dict(target=t, trait=x, residual_on='none',
-                              expected_sign=sign, fold_seed='none',
-                              rho_within=u['rho_within'], lo=lo, hi=hi,
-                              n=u['n']))
-            for bn in bases:
-                cols = [rcols[(x, bn, f)] for f in fold_seeds]
-                v = rho_within_splits(dd, cols, t, strata, dd.block1000,
-                                      dir_boot)
-                drows.append(dict(target=t, trait=x, residual_on=bn,
-                                  expected_sign=sign, fold_seed='mean',
-                                  rho_within=v['rho_within'], lo=v['lo'],
-                                  hi=v['hi'], n=u['n']))
-                for f, (est, lo, hi) in zip(fold_seeds, v['per_split']):
-                    drows.append(dict(target=t, trait=x, residual_on=bn,
-                                      expected_sign=sign, fold_seed=f,
-                                      rho_within=est, lo=lo, hi=hi,
-                                      n=u['n']))
-        for bn in ['none'] + list(bases):
-            click.echo(f'    directions | {bn:13s} ' + '  '.join(
-                f'{y["trait"][:4]} {y["rho_within"]:+.2f} '
-                f'[{y["lo"]:+.2f},{y["hi"]:+.2f}]' for y in drows
-                if y['target'] == t and y['residual_on'] == bn
-                and y['fold_seed'] in ('mean', 'none')))
+        for name, m in masks.items():
+            drows += direction_rows(
+                dd, t, strata, rcols, bases, fold_seeds, dir_boot,
+                directions, None if name == 'all' else m, subset=name)
         if directions_only:
             continue
 
@@ -371,7 +408,13 @@ def rule_check(d, c1, aoi, k, targets, scene, fold_seeds, n_boot, dir_boot,
         click.echo('    transfer rho ' + '  '.join(
             f'{y["features"]}|{y["elev_stratum"]} {y["rho"]:+.2f}'
             for y in trows if y['target'] == t))
-    return lrows, drows, trows
+    keep = (['block1000'] + list(targets) +
+            [f'T_{x}_18' for x in directions] + list(rcols.values()))
+    pool = dict(dd=dd[keep].assign(**{f'in_{n}': m for n, m in
+                                      masks.items()}),
+                strata=strata, rcols=rcols, bases=list(bases),
+                signs=directions)
+    return lrows, drows, trows, pool
 
 
 def rank_boot(y, p, blocks, n_boot, seed=0):
@@ -421,9 +464,18 @@ def rank_boot(y, p, blocks, n_boot, seed=0):
               help='--rule on cells >= 50%% conifer (LANDFIRE 2014 EVT; '
                    'proto_heldout_strata --conifer), elevation strata '
                    'from those cells')
+@click.option('--rule-subset', 'subsets', multiple=True,
+              type=click.Choice(list(SUBSETS)),
+              help='--rule directions also on these cells (residuals '
+                   'fitted on all): upper (upper elevation quartile) or '
+                   'highfir (>= 50%% red fir and subalpine EVT)')
+@click.option('--rule-pool', is_flag=True,
+              help='--rule directions also pooled over the AOIs '
+                   '(within-AOI strata, blocks resampled jointly)')
 def main(outputdir, aois, scale, rank, n_boot, scenes, landsat_composites,
          dir_boot, tag, fold_seed, rule, rule_scene, targets, learner,
-         resid_learner, rule_directions_only, conifer_only):
+         resid_learner, rule_directions_only, conifer_only, subsets,
+         rule_pool):
     rc.FOLD_SEED = fold_seed
     outputdir.mkdir(parents=True, exist_ok=True)
     scale_m = rc.RES * scale
@@ -431,18 +483,45 @@ def main(outputdir, aois, scale, rank, n_boot, scenes, landsat_composites,
     ladder_rows, transfer_rows, rho_rows = [], [], []
     if rule:
         out = {'ladder': [], 'directions': [], 'transfer': []}
+        pools = {}
         for aoi in aois:
             d, c1 = build(aoi, scale, rank, conifer_only)
             tags = dict(aoi=aoi, scale_m=scale_m, standardize=std,
                         learner=learner, scene=rule_scene,
                         cells='conifer' if conifer_only else 'all')
-            for name, rows in zip(out, rule_check(
-                    d, c1, aoi, scale, list(targets), rule_scene,
-                    rc.FOLD_SEEDS, n_boot, dir_boot, learner,
-                    resid_learner, rule_directions_only, conifer_only)):
+            *res, pools[aoi] = rule_check(
+                d, c1, aoi, scale, list(targets), rule_scene,
+                rc.FOLD_SEEDS, n_boot, dir_boot, learner, resid_learner,
+                rule_directions_only, conifer_only, subsets)
+            for name, rows in zip(out, res):
                 out[name] += [dict(x, **tags) for x in rows]
                 pd.DataFrame(out[name]).to_csv(
                     outputdir / f'rule_{name}{tag}.csv', index=False)
+        if rule_pool and len(aois) > 1:
+            # within-AOI strata and 1 km blocks, the AOIs' cells together
+            p0 = pools[aois[0]]
+            dd = pd.concat([p['dd'].assign(
+                block1000=a + '_' + p['dd'].block1000.astype(str))
+                for a, p in pools.items()], ignore_index=True)
+            strata = pd.concat([a + '_' + p['strata'].astype(str)
+                                for a, p in pools.items()],
+                               ignore_index=True)
+            tags = dict(aoi='+'.join(aois), scale_m=scale_m,
+                        standardize=std, learner=learner, scene=rule_scene,
+                        cells='conifer' if conifer_only else 'all')
+            click.echo(f'[{tags["aoi"]}] pooled directions')
+            for t in targets:
+                if not t.endswith('recovery'):
+                    continue
+                click.echo(f'  {t}')
+                for name in ['all', *subsets]:
+                    rows = direction_rows(
+                        dd, t, strata, p0['rcols'], p0['bases'],
+                        rc.FOLD_SEEDS, dir_boot, p0['signs'],
+                        dd[f'in_{name}'].values, subset=name)
+                    out['directions'] += [dict(x, **tags) for x in rows]
+            pd.DataFrame(out['directions']).to_csv(
+                outputdir / f'rule_directions{tag}.csv', index=False)
         return
     if scenes:
         lrows, drows = [], []

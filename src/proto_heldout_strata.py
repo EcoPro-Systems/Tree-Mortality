@@ -92,15 +92,29 @@ def conifer_pixels(aoi):
     return group_pixels(aoi, CONIFER)
 
 
+def site_pixels(env, aoi, last_year=LAST_YEAR):
+    """Undisturbed forest pixels inside the area's own mask"""
+    valid = rc.undisturbed(env, last_year)
+    m = aoi_mask(aoi)
+    if m is not None:
+        valid &= m
+    return valid
+
+
+def group_share(aoi, groups, k=3, last_year=LAST_YEAR):
+    """Cells (as in elevation_cells) with the share of their valid pixels
+    in these EVT groups"""
+    valid = site_pixels(rc.open_env(aoi), aoi, last_year)
+    return rc.cell_table(
+        {'share': group_pixels(aoi, groups).astype(np.float32)}, valid, k)
+
+
 def elevation_cells(aoi, k=3, last_year=LAST_YEAR, conifer=False,
                     min_elevation=None, max_elevation=None):
     """Cells with their mean elevation (m) on undisturbed forest pixels,
     and their conifer share where the area has a forest-type grid"""
     env = rc.open_env(aoi)
-    valid = rc.undisturbed(env, last_year)
-    m = aoi_mask(aoi)
-    if m is not None:
-        valid &= m
+    valid = site_pixels(env, aoi, last_year)
     layers = {'elevation': env.elevation.values}
     if conifer or (rc.E / 'env' / f'{aoi}_ftype.nc').exists():
         layers['conifer'] = conifer_pixels(aoi).astype(np.float32)

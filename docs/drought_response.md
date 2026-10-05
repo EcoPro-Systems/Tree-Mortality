@@ -2994,6 +2994,70 @@ from the conifer cells; they match §38):
 - The pilot sites keep the same conifer cells as in §38 (NEON 18,684 before
   the Landsat-scene filter, 18,643 after).
 
+### 40. Does the structural-carbon direction hold in the pilots' high country? (`hls_results/forward_pilot_rule/rule_directions_upper.csv`)
+
+Two thirds of the conifer `yosemite_rest` cells lie above the pilot sites'
+upper conifer quartile (§38): red fir and lodgepole pine, where the pilots
+are mostly mixed conifer. This section asks, on the pilot sites only,
+whether the directions of the §35 rule hold there.
+
+**Design** (`proto_forward_pilot.py --rule --rule-directions-only
+--conifer-only --rule-subset upper --rule-subset highfir --rule-pool`).
+- The trait residuals are fitted exactly as in §38, on all conifer cells
+  of each pilot, under the five fixed fold assignments. Only the cells on
+  which the within-stratum ρ is computed change:
+  - `upper`: the site's upper conifer elevation quartile (≥ 2,425 m at
+    NEON, 4,585 cells; ≥ 2,403 m at `sierra_nf`, 4,570);
+  - `highfir`: cells ≥ 50% red-fir or subalpine EVT (8,436 and 11,032).
+- Pooled: both pilots together, strata and 1 km blocks kept apart by site,
+  blocks resampled jointly.
+- The `all` rows reproduce §38 to the last digit (score on Env+S+Leg+L1,
+  NDMI recovery: NEON −0.0743, `sierra_nf` −0.0835).
+- In `upper`, strata with fewer than 100 cells drop out: 7 strata (3,797
+  cells) remain at NEON and 5 (4,299) at `sierra_nf`.
+
+**Structural-carbon score, residual on Env+S+Leg+L1** (average over five
+splits, 95% CI; range over the splits):
+
+| Cells | NDMI recovery | NIRv recovery |
+|---|---|---|
+| NEON, all conifer | −0.074 [−0.102, −0.046] | −0.101 [−0.131, −0.071] |
+| NEON, `upper` | **−0.103** [−0.156, −0.045] (−0.112 to −0.093) | **−0.131** [−0.180, −0.079] |
+| NEON, `highfir` | **−0.106** [−0.143, −0.068] | **−0.139** [−0.173, −0.105] |
+| `sierra_nf`, all conifer | −0.084 [−0.116, −0.051] | −0.070 [−0.101, −0.039] |
+| `sierra_nf`, `upper` | −0.067 [−0.142, 0.000] (−0.079 to −0.055) | −0.028 [−0.095, 0.039] |
+| `sierra_nf`, `highfir` | **−0.071** [−0.109, −0.032] | **−0.058** [−0.097, −0.019] |
+| **Pooled, `upper`** | **−0.084** [−0.127, −0.040] (−0.090 to −0.076) | **−0.076** [−0.121, −0.034] |
+| **Pooled, `highfir`** | **−0.086** [−0.112, −0.058] | **−0.092** [−0.119, −0.062] |
+
+The per-trait ρ on the same base, pooled (`upper` / `highfir`), NDMI
+recovery:
+- lignin −0.109 [−0.152, −0.066] / −0.102 [−0.130, −0.073];
+- cellulose −0.044 [−0.084, −0.001] / −0.056 [−0.083, −0.030];
+- nitrogen +0.130 / +0.123 and LMA −0.148 / −0.132, every CI excluding 0.
+
+- **The score keeps its negative sign in every subset, at both sites, for
+  both responses, and under every split.** Pooled, its CI excludes 0 in
+  both subsets for NDMI and NIRv recovery. At NEON it is stronger above
+  the upper quartile than on all conifer cells.
+- **`sierra_nf` alone is weaker high up.** Its NDMI score in `upper` has
+  the expected sign but a CI reaching 0 (+0.0004); NIRv is −0.028 (n.s.).
+  Cellulose carries most of the weakening: it has no direction in
+  `sierra_nf` `upper` (NDMI −0.045, n.s.; NIRv +0.008), and is n.s. in NEON
+  `upper` (−0.042). Lignin keeps its CI below 0 in every subset except
+  `sierra_nf` `upper` for NIRv (−0.060 [−0.122, 0.004]).
+- In the red-fir/subalpine subset every score CI excludes 0 at each site
+  separately.
+- Leaf economics holds too: N and LMA keep their directions in every
+  subset, with larger ρ high up at NEON (N +0.19, LMA −0.22 in `upper`).
+
+**Reading.** On the pilot sites the structural-carbon direction holds in
+upper-montane and subalpine conifer, the stands that make up most of the
+held-out remainder, when both pilots are pooled and by forest type at each
+site. The margin is thinner than on all conifer cells at `sierra_nf`, and
+it rests on lignin more than on cellulose there. The held-out test cells
+(§39) are unchanged.
+
 ## Summary
 
 1. **Coverage.**
@@ -3196,12 +3260,19 @@ from the conifer cells; they match §38):
 31. **The held-out test cells are fixed** (§39): the conifer cells of
     `stanislaus` (49,442) and `yosemite_rest` (234,713), with their
     elevation cutpoints; `seki` stays held out and is not tested.
+32. **The structural-carbon direction holds in the pilots' high country**
+    (§40). Above each pilot's upper conifer quartile, pooled over both
+    pilots, the score on Env+S+Leg+L1 gives −0.084 [−0.127, −0.040] for
+    NDMI recovery (red-fir/subalpine cells: −0.086). It keeps its sign in
+    every subset; `sierra_nf` alone is borderline high up (−0.067, CI to
+    0), mostly because cellulose loses its direction there.
 
 ## Code
 
 `fetch_landsat_c2_ee.py` (`--scene`), `fetch_disturbance_aois.py`, `aoi_env_layers.py` (`--masks-only`, `--disturbance-dir`),
 `fetch_heldout_masks.py`, `proto_heldout_strata.py` (`--conifer`,
-`--min-elevation`, `--max-elevation`, `--pool`, `--key`; `test_cells`), `collect_fold_seeds.py`,
+`--min-elevation`, `--max-elevation`, `--pool`, `--key`; `test_cells`,
+`group_share`), `collect_fold_seeds.py`,
 `query_airborne_coverage.py`,
 `response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`
 (`--interval`, `--fold-seed`, `--tag`),
@@ -3216,7 +3287,7 @@ from the conifer cells; they match §38):
 `rho_within_splits`),
 `proto_forward_pilot.py` (`--landsat`, `--landsat-composites`, `--tag`,
 `--fold-seed`, `--rule` with `--rule-scene`, `--learner`, `--resid-learner`,
-`--rule-directions-only`, `--conifer-only`; `ECOPRO_JOBS` worker processes
+`--rule-directions-only`, `--conifer-only`, `--rule-subset`, `--rule-pool`; `ECOPRO_JOBS` worker processes
 via `response_common.pmap`),
 `proto_transfer_diagnostics.py`,
 `proto_structure_from_spectra.py` (`--fold-seed`, `--tag`), `proto_trait_diversity.py`,
