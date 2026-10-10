@@ -52,6 +52,10 @@ for _src in ('hs', 'stovall'):
     for _l in ('neon2013', 'aso', 'lvis2008'):
         FAMILIES[f'mortality_{_src}_common_lidar_{_l}'] = (
             [(_dir, f'lidar_check_{_l}')], [])
+    # The same, with the conditional (site and aridity) splits
+    FAMILIES[f'mortality_{_src}_common_conditional'] = (
+        [(f'stovall_check/models/by_site/{_src}_common',
+          'response_traits_conditional')], ['split', 'group'])
 SEED_RE = re.compile(r'_fold(\d+)')
 
 

@@ -3251,6 +3251,77 @@ Env+S plus the NEON 2013 structure.
 - **Correcting the lidar-tree cohort's gridding changes nothing material**
   (+T +0.079 vs +0.083; residuals within ±0.005).
 
+### 42. Does the SOAP–TEAK mortality contrast depend on the mortality product? (`hls_results/stovall_check/models/by_site/`)
+
+§2 found a much larger mortality trait gain at SOAP than at TEAK (+0.19
+vs +0.04). §41 found that the two mortality products agree at SOAP and
+not at TEAK, so the small TEAK gain could come from the target rather
+than the trees. The §41 reruns skipped the conditional splits
+(`--gains-only`). This section reruns them for each target.
+
+**Design.**
+- The same `proto_response_traits.py` runs as §41, at 90 m, weighted by
+  tree count, without `--gains-only`. The targets and cells are those of
+  §41's table.
+- The site split is the script's: the western and eastern halves of the
+  AOI grid. It differs from §41's x = 310,000 split in 292 cells, none of
+  which has a value under either product, so for mortality the two splits
+  are the same.
+- A rerun through the pre-fix trait-dynamics table
+  (`trait_dynamics/pre_cohort_fix/`) reproduces §2's conditional rows to
+  the last digit.
+
+| Target (cells) | Site | n | Env+S R² | +T over Env+S |
+|---|---|---|---|---|
+| HS as recorded, old gridding (7,040; §2) | SOAP | 1,410 | 0.33 | **+0.192** [0.128, 0.266] |
+| | TEAK | 5,630 | 0.20 | +0.037 [0.016, 0.057] |
+| HS, corrected (6,866) | SOAP | 1,370 | 0.33 | **+0.177** [0.125, 0.244] |
+| | TEAK | 5,496 | 0.22 | +0.041 [0.019, 0.063] |
+| HS, common (4,028) | SOAP | 1,099 | 0.27 | **+0.183** [0.091, 0.286] |
+| | TEAK | 2,929 | 0.15 | +0.060 [0.036, 0.083] |
+| **Stovall, common (4,028)** | SOAP | 1,099 | 0.17 | **+0.188** [0.106, 0.286] |
+| | TEAK | 2,929 | 0.40 | +0.038 [0.011, 0.070] |
+| Stovall, outside the mask (6,858) | SOAP | 1,385 | 0.11 | **+0.267** [0.190, 0.364] |
+| | TEAK | 5,473 | 0.40 | +0.054 [0.031, 0.078] |
+
+**Fold assignments** (common cells, default plus `--fold-seed` 1–3;
+`fold_robustness/mortality_*_common_conditional.csv`):
+
+| +T over Env+S | HS, common | Stovall, common |
+|---|---|---|
+| SOAP | +0.170 to +0.251 (robust) | +0.124 to +0.188 (robust) |
+| TEAK | +0.054 to +0.075 (robust) | +0.038 to +0.074 (robust) |
+| SOAP − TEAK | +0.097 to +0.197 | +0.051 to +0.150 |
+
+- SOAP is ahead of TEAK under every assignment. Its lowest estimate is
+  above TEAK's highest under both targets.
+- The two sites' CIs are disjoint under the default assignment for every
+  target. On the common cells they overlap under two of the three
+  shuffled assignments for HS and under all three for Stovall. The SOAP
+  side has only 1,099 cells.
+
+**Resilience.** The NDMI resilience contrast of §2 (+0.09 at SOAP vs
++0.04 at TEAK) is a Landsat target and does not depend on either
+mortality product.
+
+**Aridity terciles.** The dry tercile has the largest gain under the
+default assignment for every new target. The order of the dry and wet
+terciles reverses under some shuffled assignments for both targets, so
+§2's reading (no consistent aridity pattern) stands.
+
+**Reading.**
+- **The site contrast does not depend on the mortality product.** Traits
+  add about 0.18–0.27 at SOAP and 0.04–0.06 at TEAK under both products,
+  on the common cells, and outside the mask. SOAP stays ahead under every
+  fold assignment. On the common cells its CIs separate from TEAK's under
+  the default assignment only.
+- **The baselines move, the gains do not.** Env+S predicts Stovall
+  mortality better at TEAK than HS mortality (R² 0.40 vs 0.15), and
+  worse at SOAP (0.17 vs 0.27). The trait gain at each site is nearly
+  the same under both products. So the small TEAK gain is not explained
+  by the disagreement at TEAK, nor by headroom: under HS, TEAK has the
+  lower baseline and still the smaller gain.
+
 ## Summary
 
 1. **Coverage.**
@@ -3468,6 +3539,11 @@ Env+S plus the NEON 2013 structure.
     nearly all of it. Residual traits stay ≤ +0.033, and none survives
     every fold assignment under either target or any lidar source. A
     gridding fix to the lidar-tree fraction moves nothing material.
+34. **The SOAP–TEAK mortality contrast holds under both mortality
+    products** (§42). On the common cells, traits add +0.183 at SOAP vs
+    +0.060 at TEAK with the lidar-tree target, and +0.188 vs +0.038 with
+    the NAIP-based one. SOAP stays ahead under every fold assignment. The
+    two sites' CIs separate under the default assignment only.
 
 ## Code
 
