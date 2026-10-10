@@ -3103,6 +3103,12 @@ models with each as the target.
   (`hemming_schroeder2023/hpc/sierra/align_trees/tree_match_02_matching.R`):
   each Stovall tree goes to the nearest HS 2017 treetop, and counts as
   matched if it lies inside that tree's 2013 crown.
+  - This reproduces HS's published confusion matrix (their Table 3) to
+    within 0.03%: 714,491 matched trees (theirs 714,656); 151,394 dead in
+    both (151,393); 368,579 live in both (368,576).
+  - The paper's text and the script's readme describe other rules (a
+    search from each HS tree; any containing crown, ties broken by
+    height), but the published numbers come from the script.
 
 **A fix in the lidar-tree cohort.**
 - `proto_trait_dynamics.lidar_cohort` gave pixels without cohort trees 0
