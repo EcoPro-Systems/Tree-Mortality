@@ -90,7 +90,8 @@ def mortality_target(d, aoi, k, source='dynamics', cells='all'):
     """Choose the tree-mortality target held in mort_frac/mort_n.
 
     source: dynamics  the lidar-tree fraction of proto_trait_dynamics.py
-                      (as in every run before the NAIP-based check)
+                      (the same as hs since the gridding fix of
+                      lidar_cohort; runs before it used the old fraction)
             hs        the same lidar-tree cohort gridded by
                       proto_stovall_check.py
             stovall   the NAIP-based cohort (proto_stovall_check.py)

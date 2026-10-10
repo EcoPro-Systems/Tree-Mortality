@@ -350,7 +350,7 @@ notes gave that all-pixel series as "forest".
     retrieval artifacts on red and grey canopy.
 - **Agreement with Landsat.** EWT resilience vs the same-years Landsat June
   NDMI metric is ρ 0.78 (NEON) and 0.79 (`sierra_nf`). EWT resilience vs
-  lidar mortality is ρ −0.47.
+  lidar mortality is ρ −0.51 (−0.47 before the gridding fix of §41).
 
 **Change features.** AVIRIS change (A: ΔEWT, ΔLMA, ΔN, Δchlorophyll,
 Δgreen-fraction QC) vs Landsat June change (L: ΔNDMI, ΔNIRv, ΔNDVI), for
@@ -360,7 +360,7 @@ notes gave that all-pixel series as "forest".
 |---|---|---|---|---|
 | NEON NDMI recovery | **+0.118 [0.075, 0.162]** | +0.321 | +0.015 | +0.007 [0.004, 0.009] |
 | NEON NDMI resilience | −0.018 (n.s.) | +0.164 | +0.039 | +0.013 [0.010, 0.017] |
-| NEON lidar mortality | −0.115 | +0.124 | +0.048 | +0.022 [−0.007, 0.043] |
+| NEON lidar mortality | −0.102 | +0.125 | +0.054 | +0.027 [0.006, 0.047] |
 | `sierra_nf` NDMI recovery | **+0.150 [0.130, 0.170]** | +0.207 | +0.015 | +0.010 [0.007, 0.013] |
 | `sierra_nf` NIRv recovery | **+0.076 [0.055, 0.097]** | +0.153 | +0.013 | +0.007 [0.004, 0.011] |
 | `sierra_nf` NDMI resilience | +0.019 (n.s.) | +0.123 | +0.023 | +0.007 [0.005, 0.010] |
@@ -370,12 +370,14 @@ notes gave that all-pixel series as "forest".
 - **The two are complementary.** L+A beats L by +0.10 to +0.32 everywhere.
 - **On top of Env+S and Landsat change,** AVIRIS change still adds a small
   gain (+0.006 to +0.014) whose CI excludes 0 for every Landsat target. For
-  the lidar mortality fraction it adds +0.017 to +0.022, with a CI touching
-  0 (about 7,000 lidar cells).
+  the lidar mortality fraction it adds +0.018 (2013→2014) to +0.027
+  (2013→2015) on 6,885 lidar cells. Both CIs exclude 0 under the default
+  folds but not under every fold assignment (§36). Before the gridding fix
+  of §41 it was +0.017 to +0.022, with a CI touching 0.
 - **Recovery failure** (bottom quintile of NDMI resilience), AUC at NEON:
   Env+S 0.912; +L 0.929; +L+A 0.932.
 - **Cross-track normalization** helps the Landsat targets (A vs raw A: +0.03
-  to +0.09) but hurts 2013→2015 lidar mortality (−0.054). Both versions are
+  to +0.09) but hurts 2013→2015 lidar mortality (−0.042). Both versions are
   reported.
 - **Caveat.** The Landsat targets share sensor noise with the Landsat change
   features, which favours L. The lidar target is the unbiased comparison.
@@ -2730,7 +2732,7 @@ Each was run with `--fold-seed` and `--tag _fold<s>_<aoi>`.
 | same, beyond Landsat-emulated structural carbon (§24) | **+0.006** / **+0.009 to +0.011** | −0.002 to −0.004 / −0.001 to +0.002 (n.s.) |
 | AVIRIS change on top of Env+S + Landsat change, NDMI recovery (§3) | **+0.006 to +0.008** | **+0.009 to +0.011** |
 | same, NDMI resilience / NIRv recovery / NIRv resilience | **+0.010 to +0.013** / **+0.009 to +0.012** / **+0.006 to +0.008** | **+0.007 to +0.010** / **+0.007 to +0.009** / **+0.006 to +0.007** |
-| same, lidar mortality fraction | +0.021 to +0.030 (CI touches 0) | – |
+| same, lidar mortality fraction | +0.015 to +0.031 (CI touches 0 under two; +0.021 to +0.030 before the gridding fix of §41) | – |
 | residual traits over lidar, NDMI resistance: 2013 trees / LVIS / ASO (§5) | +0.003 to +0.011 / **+0.013 to +0.017** / +0.005 to +0.010 (CI touches 0 under two) | ASO **+0.010 to +0.014** |
 | same, NDMI resilience | −0.004 to −0.010 / **+0.028 to +0.033** / **+0.015 to +0.018** | **+0.011 to +0.015** |
 | same, NDMI stress response | **+0.008 to +0.028** (CI touches 0 under three) / **+0.019 to +0.024** / **+0.016 to +0.024** | **+0.018 to +0.021** |
@@ -3099,6 +3101,13 @@ models with each as the target.
     at TEAK.
   - 97% of the candidate pixels have an HS 2017 value, so the gaps are
     their mask, not gaps in HS.
+- **Queally et al.'s reconciliation.** The mask is how they reconciled
+  the two products: they traced "the areas of highest divergence" to the
+  oblique NAIP lines and, with those masked, found that both products
+  "consistently capture broad-scale mortality trends" along each
+  predictor. They kept a caveat about HS's lower 2017 mortality at TEAK.
+  On their own masked grid, TEAK still gives ρ 0.40 at 90 m, with Stovall
+  +0.15 higher (below).
 - **Tree matching** follows HS's own script
   (`hemming_schroeder2023/hpc/sierra/align_trees/tree_match_02_matching.R`):
   each Stovall tree goes to the nearest HS 2017 treetop, and counts as
@@ -3119,10 +3128,13 @@ models with each as the target.
     90 m; r = 0.92 between the two);
   - `mort_n` was too high, so 174 of those cells really have fewer than 5
     trees.
-- This is now fixed. The trait-dynamics table on disk, and every earlier
-  mortality result, still use the old fraction.
-- The "HS, corrected" rerun below shows that the effect on the results is
-  small.
+- This is now fixed, and the trait-dynamics table has been rebuilt with
+  the corrected fraction (old outputs in
+  `trait_dynamics/pre_cohort_fix/`). §3 and §36 quote the rebuilt numbers.
+- The earlier mortality results of §2 and §5 still use the old fraction.
+  The "HS, corrected" rerun below shows that the effect on them is small.
+- The trait-dynamics rows that do not involve mortality are unchanged to
+  the last digit.
 
 **Tree level.** On matched cohort trees: Stovall died by 2016 vs HS died
 in 2017–18.
@@ -3177,7 +3189,7 @@ in 2017–18.
 
 | Target (cells) | +T over Env+S | L over Env+S, NEON 2013 | +L+T, NEON 2013 | +L+Tres, NEON 2013 | +L+Tres, ASO | +L+Tres, LVIS |
 |---|---|---|---|---|---|---|
-| HS as recorded (7,040) | +0.083 [0.061, 0.107] | +0.148 | +0.025 [0.013, 0.038] | +0.003 (n.s.) | +0.021 [0.001, 0.041] | −0.006 (n.s.) |
+| HS as recorded, old gridding (7,040) | +0.083 [0.061, 0.107] | +0.148 | +0.025 [0.013, 0.038] | +0.003 (n.s.) | +0.021 [0.001, 0.041] | −0.006 (n.s.) |
 | HS, corrected (6,866) | +0.079 [0.051, 0.106] | +0.127 | +0.021 [0.008, 0.034] | −0.002 (n.s.) | +0.020 [0.002, 0.039] | −0.002 (n.s.) |
 | HS, common (4,028) | +0.092 [0.059, 0.129] | +0.140 | +0.020 [0.009, 0.031] | +0.009 (n.s.) | +0.020 (n.s.) | −0.019 (n.s.) |
 | **Stovall, common (4,028)** | **+0.072** [0.045, 0.102] | +0.123 | +0.017 [0.000, 0.035] | −0.001 (n.s.) | +0.028 [0.005, 0.058] | −0.011 (n.s.) |
@@ -3186,7 +3198,9 @@ in 2017–18.
 - **Cells.** ASO and LVIS cells are, in row order: 5,427 / 3,724;
   5,294 / 3,619; 2,845 / 1,893 for both common rows; 5,279 / 3,054.
 - **The default `dynamics` path is a no-op.** The "HS as recorded" row was
-  rerun through it and reproduces §2 and §5 to the last digit.
+  rerun through it, before the trait-dynamics table was rebuilt, and
+  reproduces §2 and §5 to the last digit. With the rebuilt table, the
+  default target is the "HS, corrected" one.
 - **Fold assignments** (default plus `--fold-seed` 1–3, common cells;
   `fold_robustness/mortality_*.csv`): range of the point estimates, and
   whether every CI excludes 0.
