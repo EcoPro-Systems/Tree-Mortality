@@ -30,6 +30,7 @@ analysed the same way.
 | WDTS traits and canopy water | `wdts/<aoi>_traits.nc`, `wdts/<aoi>_cwc.nc` | As before. `fetch_wdts_cwc.py` now also saves `nadir_dist`. `stanislaus` traits (Tahoe box, UTM 11) are warped onto the UTM 10 AOI grid with nearest neighbour; no canopy water there yet |
 | Geology | `env/<aoi>_geology.nc`; source in `geology/` | From `fetch_geology.py`: USGS State Geologic Map Compilation, California (1:750,000), grouped into granitic, volcanic, metamorphic, surficial and other on the 30 m grids |
 | Reflectance caches for emulated retrievals | `wdts/sim/<aoi>_refl<year>.nc`, `wdts/sim/<aoi>_refl_<yymmdd>_<product>.nc`, `wdts/sim/<aoi>_l8_<date>.nc` | From `proto_spaceborne_sim.py refl` (2013; 2018 for NEON and `sierra_nf`; 2013 for `stanislaus`), `proto_spaceborne_ts.py refl` (NEON and `sierra_nf`: 2013-05-03 and 2013-06-26 from ORNL DAAC 2391; 2018-06-22 and 2018-08-28 from ORNL DAAC 2154) and `fetch_landsat_c2_ee.py --scene` (2013-05-04, 05-20, 06-05, 06-21, 07-07, 07-23 (no clear pixels), 08-08; 2013-05-27 (no clear pixels), 06-12 and 06-28 Tahoe; 2018-06-19, 07-05, 07-21, 08-06, 08-22, 09-07) |
+| NAIP-based tree mortality (SOAP/TEAK) | `stovall2019/ALLtrees_v2.csv`; `queally2025/{mortality,sites}.tif` | From `fetch_stovall2019.py`: Stovall et al. (2019), figshare 7609193 v4 (CC BY 4.0), about 1.8 M NEON-2013 lidar crowns with NAIP 2009–2016 crown mortality. From `fetch_queally2025.py`: the 30 m grid of Queally et al. (2025), Zenodo 13436293 (CC BY 4.0), with its NAIP flight-line mask. Both save `record.json` |
 | Airborne lidar structure | `lidar/<aoi>_lidar.nc`; raw in `lidar/aso/`, `lidar/lvis2008/` | From `fetch_lidar_structure.py`: ASO 2014–17 composite (Ferraz et al. 2020) and LVIS Sep 2008 footprints on the 30 m grids. Coverage and sources: `lidar_coverage.md` |
 
 ## Airborne imaging spectroscopy over the study boxes, 2018–2025 (`hls_results/airborne_coverage/`)
@@ -3058,6 +3059,178 @@ site. The margin is thinner than on all conifer cells at `sierra_nf`, and
 it rests on lignin more than on cellulose there. The held-out test cells
 (§39) are unchanged.
 
+### 41. Does a second, NAIP-based mortality product agree with the lidar trees? (`hls_results/stovall_check/`)
+
+Every mortality result so far uses one product: the NEON lidar-tree cohort
+of Hemming-Schroeder et al. (2023, "HS"), trees live in 2013 and dead in
+both 2017 and 2018. It is a greenness classifier trained on labels from the
+same two sites, and nothing independent had checked it. Stovall, Shugart &
+Yang (2019) segmented crowns from the same NEON 2013 lidar canopy height
+model and classified each crown in NAIP 2009–2016. This section compares
+the two products tree by tree and cell by cell, then reruns the mortality
+models with each as the target.
+
+**Data and design** (`fetch_stovall2019.py`, `fetch_queally2025.py`,
+`proto_stovall_check.py`).
+- **Stovall trees.** `ALLtrees_v2.csv` (figshare 7609193 v4, md5 checked)
+  holds 1,808,334 trees: 309,034 at SOAP and 1,499,300 at TEAK, split at
+  x = 310,000 as HS did. 85% fall inside the AOI grid. `dead` equals
+  `mort_year` ≠ "Live" for every tree. Of the trees first dead in 2016,
+  99.7% have more than 37.5% of the crown dead that year.
+- **Cohort.** Trees alive through 2012 (`mort_year` not 2009, 2010 or
+  2012): 1,680,113. Died means first dead in 2014 or 2016 (36%). Stovall
+  ends in 2016, so trees that died in 2017 count only in HS.
+- **CRS.** For trees ≥ 30 m, the median offset from a Stovall point to the
+  nearest HS 2013 treetop is ≤ 0.15 m in x and y at both sites. The points
+  are read as EPSG:32611, with no shift.
+- **Gridding.** Per-pixel counts on the AOI's 30 m grid and cell means at
+  90 and 270 m over undisturbed forest, with ≥ 5 cohort trees per cell, as
+  for the HS cohort. Our 30 m mean 2016 crown dead fraction (all trees)
+  reproduces the published grid of Queally et al. (2025): ρ 0.994, R² 0.99
+  on 105,520 pixels.
+- **Flight-line mask.**
+  - Queally et al. masked the areas that one NAIP 2016 date imaged at a
+    high sensor zenith angle, with heavy shading. Their 30 m grid (Zenodo
+    13436293, on our lattice) is empty there.
+  - `fetch_queally2025.py` reads four small members from the 3.1 GB archive
+    by HTTP range requests.
+  - The mask is the set of pixels where both products have trees but the
+    grid is empty, in areas ≥ 1 ha: 44,975 pixels (4,048 ha), 94% of them
+    at TEAK.
+  - 97% of the candidate pixels have an HS 2017 value, so the gaps are
+    their mask, not gaps in HS.
+- **Tree matching** follows HS's own script
+  (`hemming_schroeder2023/hpc/sierra/align_trees/tree_match_02_matching.R`):
+  each Stovall tree goes to the nearest HS 2017 treetop, and counts as
+  matched if it lies inside that tree's 2013 crown.
+
+**A fix in the lidar-tree cohort.**
+- `proto_trait_dynamics.lidar_cohort` gave pixels without cohort trees 0
+  deaths but no trees (NaN).
+- In cells that had such pixels, the fraction was therefore divided over
+  too few pixels:
+  - it was biased low (mean 0.247 instead of 0.264 over 7,059 cells at
+    90 m; r = 0.92 between the two);
+  - `mort_n` was too high, so 174 of those cells really have fewer than 5
+    trees.
+- This is now fixed. The trait-dynamics table on disk, and every earlier
+  mortality result, still use the old fraction.
+- The "HS, corrected" rerun below shows that the effect on the results is
+  small.
+
+**Tree level.** On matched cohort trees: Stovall died by 2016 vs HS died
+in 2017–18.
+
+| Site | Trees | Stovall died | HS died | Agreement | κ |
+|---|---|---|---|---|---|
+| SOAP | 143,322 | 0.42 | 0.51 | 0.84 | **0.68** |
+| TEAK | 300,380 | 0.34 | 0.23 | 0.72 | 0.33 |
+| TEAK, outside the mask | 165,795 | 0.46 | 0.21 | 0.65 | 0.25 |
+
+- **By height** (5–15 / 15–30 / > 30 m, outside the mask): κ at SOAP is
+  0.55 / 0.69 / 0.61; at TEAK it is 0.14 / 0.19 / 0.30.
+- **Inside the masked area at TEAK**, Stovall finds less mortality than HS
+  (0.19 vs 0.25). Outside it, Stovall finds more than twice as much.
+- **Matching.**
+  - 40% of Stovall cohort trees match (58% at SOAP, 36% at TEAK). So do 69%
+    of the HS cohort trees in the area Stovall covers.
+  - Stovall splits crowns more finely: 43,830 HS trees took more than one
+    Stovall tree.
+- **Matched vs unmatched.** At SOAP, matched Stovall trees died more often
+  than unmatched ones: 0.41 vs 0.29 overall, and still in each height class
+  (> 30 m: 0.62 vs 0.49). At TEAK the order reverses (0.33 vs 0.39). HS
+  trees differ less (SOAP 0.53 vs 0.42; TEAK 0.23 vs 0.21).
+
+**Cell level** (cohort died fractions; 1 km block-bootstrap CIs;
+`agreement.csv`):
+
+| Cells | Site | n | ρ | r² | Stovall − HS |
+|---|---|---|---|---|---|
+| 90 m, outside the mask | SOAP | 1,099 | **0.84** [0.78, 0.88] | 0.72 [0.65, 0.77] | −0.101 [−0.123, −0.073] |
+| 90 m, outside the mask | TEAK | 2,943 | 0.37 [0.30, 0.44] | 0.14 [0.10, 0.19] | **+0.279** [+0.256, +0.299] |
+| 90 m, outside the mask | both | 4,042 | 0.25 [0.19, 0.31] | 0.07 [0.05, 0.11] | +0.175 [+0.132, +0.219] |
+| 90 m, all | SOAP | 1,297 | 0.77 [0.65, 0.85] | 0.60 [0.46, 0.72] | −0.098 [−0.122, −0.066] |
+| 90 m, all | TEAK | 5,511 | 0.15 [0.08, 0.23] | 0.03 [0.01, 0.06] | +0.127 [+0.089, +0.164] |
+| 30 m, outside the mask | SOAP / TEAK | 8,385 / 18,162 | 0.79 / 0.33 | 0.64 / 0.11 | −0.101 / +0.298 |
+| 270 m, outside the mask | SOAP / TEAK | 122 / 302 | 0.81 / 0.44 | 0.67 / 0.20 | −0.095 / +0.287 |
+
+- **On the 1:1 line**, Stovall explains HS with R² +0.36 at SOAP (90 m,
+  outside the mask) and negative R² at TEAK at every scale.
+- **Queally's continuous form** (mean 2016 crown dead fraction of all
+  trees) against the HS cohort fraction, 90 m outside the mask: ρ 0.77 at
+  SOAP and 0.37 at TEAK.
+- **Queally's own grid**, aggregated to 90 m: ρ 0.74 (SOAP) and 0.40
+  (TEAK); Stovall − HS at TEAK is +0.15.
+
+**Mortality reruns** (`stovall_check/models/<target>_<cells>/`;
+`proto_response_traits.py --mortality-source --mortality-cells`).
+- The design is as in §2 and §5, at 90 m, weighted by tree count.
+- "Common" cells are those outside the mask with both cohorts. On these
+  the NEON 2013 structure block exists for every cell, so the NEON 2013
+  check uses the same 4,028 cells for both targets.
+
+| Target (cells) | +T over Env+S | L over Env+S, NEON 2013 | +L+T, NEON 2013 | +L+Tres, NEON 2013 | +L+Tres, ASO | +L+Tres, LVIS |
+|---|---|---|---|---|---|---|
+| HS as recorded (7,040) | +0.083 [0.061, 0.107] | +0.148 | +0.025 [0.013, 0.038] | +0.003 (n.s.) | +0.021 [0.001, 0.041] | −0.006 (n.s.) |
+| HS, corrected (6,866) | +0.079 [0.051, 0.106] | +0.127 | +0.021 [0.008, 0.034] | −0.002 (n.s.) | +0.020 [0.002, 0.039] | −0.002 (n.s.) |
+| HS, common (4,028) | +0.092 [0.059, 0.129] | +0.140 | +0.020 [0.009, 0.031] | +0.009 (n.s.) | +0.020 (n.s.) | −0.019 (n.s.) |
+| **Stovall, common (4,028)** | **+0.072** [0.045, 0.102] | +0.123 | +0.017 [0.000, 0.035] | −0.001 (n.s.) | +0.028 [0.005, 0.058] | −0.011 (n.s.) |
+| Stovall, outside the mask (6,858) | +0.067 [0.045, 0.092] | +0.123 | +0.017 [0.000, 0.035] | −0.001 (n.s.) | +0.023 [0.006, 0.039] | +0.030 [0.007, 0.053] |
+
+- **Cells.** ASO and LVIS cells are, in row order: 5,427 / 3,724;
+  5,294 / 3,619; 2,845 / 1,893 for both common rows; 5,279 / 3,054.
+- **The default `dynamics` path is a no-op.** The "HS as recorded" row was
+  rerun through it and reproduces §2 and §5 to the last digit.
+- **Fold assignments** (default plus `--fold-seed` 1–3, common cells;
+  `fold_robustness/mortality_*.csv`): range of the point estimates, and
+  whether every CI excludes 0.
+
+| Contrast | HS, common | Stovall, common |
+|---|---|---|
+| +T over Env+S | +0.084 to +0.106 (robust) | +0.040 to +0.072 (not robust) |
+| +L+T over Env+S+L, NEON 2013 | +0.015 to +0.032 (robust) | +0.012 to +0.023 (not robust) |
+| +L+Tres over Env+S+L, NEON 2013 | +0.007 to +0.022 | −0.001 to +0.014 |
+| +L+Tres over Env+S+L, ASO | +0.002 to +0.033 | +0.015 to +0.030 |
+| +L+Tres over Env+S+L, LVIS | −0.019 to +0.027 | −0.012 to +0.013 |
+
+**Leakage check** (`proto_lidar_validation.py`, common cells;
+`models/<target>_common/validation/`): what each lidar source adds beyond
+Env+S plus the NEON 2013 structure.
+
+| Target | ASO (2,845 cells) | LVIS 2008 (1,893 cells) |
+|---|---|---|
+| HS | +0.026 [−0.000, 0.053] | +0.017 [−0.001, 0.031] |
+| Stovall | +0.012 [−0.005, 0.028] | +0.048 [0.016, 0.083] |
+
+- ASO does not detectably record either product's die-off.
+- That the pre-drought LVIS adds to the Stovall target is not explained.
+
+**Reading.**
+- **The two products agree at SOAP and not at TEAK.**
+  - At SOAP, Stovall ranks 90 m cells like HS (ρ 0.84, r² 0.72), and agrees
+    on trees with κ 0.68. It reads about 0.10 lower throughout, as expected
+    when only HS counts the trees that died in 2017.
+  - At TEAK, ρ is 0.37 (κ 0.25 on trees outside the mask). Stovall's
+    mortality by 2016 is more than double HS's by 2017–18. Timing cannot
+    produce that, since Stovall ends a year earlier, and the flight-line
+    mask makes it larger, not smaller.
+  - One of the two products is wrong at TEAK, and this check cannot say
+    which. HS discuss an underestimate of their own at TEAK.
+- **Pooled over both sites the products barely agree** (ρ 0.25), because
+  their level differences have opposite signs at the two sites.
+- **The mortality results hold under both targets.**
+  - Traits add +0.07 to +0.09 over Env+S under every target. The Stovall
+    gain is smaller and fold-sensitive (+0.040 to +0.072).
+  - Lidar structure takes almost all of it. On the common cells, residual
+    traits beyond Env+S+L stay between −0.019 and +0.033 under both
+    targets, every lidar source and every fold assignment. None of these
+    gains has its CI above 0 under every assignment.
+  - On Stovall's own cells, ASO and LVIS leave +0.023 and +0.030 with CIs
+    above 0 (default assignment only). This is the size of the
+    lidar-tree cohort's ASO residual in §5 (+0.021).
+- **Correcting the lidar-tree cohort's gridding changes nothing material**
+  (+T +0.079 vs +0.083; residuals within ±0.005).
+
 ## Summary
 
 1. **Coverage.**
@@ -3266,6 +3439,15 @@ it rests on lignin more than on cellulose there. The held-out test cells
     NDMI recovery (red-fir/subalpine cells: −0.086). It keeps its sign in
     every subset; `sierra_nf` alone is borderline high up (−0.067, CI to
     0), mostly because cellulose loses its direction there.
+33. **A NAIP-based mortality product agrees with the lidar trees at SOAP,
+    not at TEAK** (§41). At 90 m outside the flight-line mask, Stovall et
+    al. (2019) vs the lidar-tree cohort gives ρ 0.84 at SOAP (Stovall
+    −0.10) and ρ 0.37 at TEAK (Stovall +0.28, more than double). Timing
+    cannot explain TEAK. The mortality results hold under both targets:
+    traits add +0.07 to +0.09 over Env+S, and lidar structure absorbs
+    nearly all of it. Residual traits stay ≤ +0.033, and none survives
+    every fold assignment under either target or any lidar source. A
+    gridding fix to the lidar-tree fraction moves nothing material.
 
 ## Code
 
@@ -3299,7 +3481,10 @@ with `--fold-seed` and `--tag`), `proto_spaceborne_ts.py` (`refl`, `emulate`, `c
 `proto_model_capacity.py` (`within`, `transfer`, `forward`; learners in
 `response_common.make_model`),
 `proto_aviris5_bridge.py` (`--traits`, `--n-comp`), `fetch_geology.py`,
-`query_emit_coverage.py`. Run from `src/` in
+`query_emit_coverage.py`, `fetch_stovall2019.py`, `fetch_queally2025.py`,
+`proto_stovall_check.py` (`--skip-matching`); `--mortality-source` and
+`--mortality-cells` in `proto_response_traits.py` and
+`proto_lidar_validation.py` (`response_common.mortality_target`). Run from `src/` in
 the `ecopro` env. Earth Engine uses the Cloud project `ecopro-509818`.
 `shap` is installed with pip. Run concurrent model jobs with
 `OMP_NUM_THREADS` set so that their threads do not exceed the cores (e.g. 3

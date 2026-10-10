@@ -43,6 +43,15 @@ FAMILIES = {
     'no_lidar': ([('structure_from_spectra', 'no_lidar_ladder')],
                  ['source']),
 }
+# Mortality reruns on the cells common to the lidar-tree and NAIP-based
+# cohorts (proto_stovall_check.py), one family per target and run
+for _src in ('hs', 'stovall'):
+    _dir = f'stovall_check/models/{_src}_common'
+    FAMILIES[f'mortality_{_src}_common_ladder'] = (
+        [(_dir, 'response_traits_ladder')], [])
+    for _l in ('neon2013', 'aso', 'lvis2008'):
+        FAMILIES[f'mortality_{_src}_common_lidar_{_l}'] = (
+            [(_dir, f'lidar_check_{_l}')], [])
 SEED_RE = re.compile(r'_fold(\d+)')
 
 

@@ -73,6 +73,12 @@ compare).
     python proto_response_traits.py $E/hls_results/response_traits \
         -a neon_soap_teak --structure neon2013 --structure aso \
         --structure lvis2008
+
+--mortality-source and --mortality-cells swap the target held in mort_frac
+(rc.mortality_target): the NAIP-based cohort of proto_stovall_check.py, the
+lidar-tree cohort gridded the same way, and the cells outside the
+flight-line mask or common to both. The NEON 2013 lidar check keeps the
+lidar-tree cells (hs_ok), where its structure block exists.
 """
 import click
 import numpy as np
@@ -194,7 +200,7 @@ def raw_block(d, aoi, k, path, y0):
 
 
 def build(aoi, k, response_dir, dynamics_dir, paths=None, y0=2013,
-          per_line=False):
+          per_line=False, mortality_source='dynamics', mortality_cells='all'):
     env = rc.open_env(aoi)
     valid = rc.undisturbed(env, 2019)
     t = trait_layers(aoi, valid, k, paths, y0, per_line)
@@ -209,6 +215,7 @@ def build(aoi, k, response_dir, dynamics_dir, paths=None, y0=2013,
                 'mort_n']
         dd = pd.read_csv(dyn, usecols=lambda c: c in cols)
         d = d.merge(dd, on=['cell_row', 'cell_col'], how='left')
+    d = rc.mortality_target(d, aoi, k, mortality_source, mortality_cells)
     d['arid'] = pd.qcut(d.cwd_clim, 3, labels=['wet', 'mid', 'dry'])
     if aoi == 'neon_soap_teak':
         # SOAP is the western (lower) half of the AOI, TEAK the eastern
@@ -220,6 +227,8 @@ def build(aoi, k, response_dir, dynamics_dir, paths=None, y0=2013,
 def structure_cells(d, aoi, k, source):
     """Cells covered by a lidar source, with its structure columns"""
     if source == 'neon2013':
+        if 'hs_ok' in d:  # mortality target from proto_stovall_check.py
+            return d[d.hs_ok]
         return d[d.mort_frac.notna()] if 'mort_frac' in d else d.iloc[:0]
     f = rc.E / 'lidar' / f'{aoi}_lidar.nc'
     if not f.exists():
@@ -479,11 +488,22 @@ def shap_summary(d, cols, target, max_n=20000):
 @click.option('--fold-seed', type=int, default=None,
               help='Shuffle 1 km blocks into folds with this seed (default: '
                    'the deterministic GroupKFold assignment)')
+@click.option('--mortality-source', type=click.Choice(rc.MORTALITY_SOURCES),
+              default='dynamics', show_default=True,
+              help='Tree-mortality target in mort_frac: the lidar-tree '
+                   'fraction from the trait-dynamics table, or the lidar-'
+                   'tree (hs) or NAIP-based (stovall) cohort from '
+                   'proto_stovall_check.py')
+@click.option('--mortality-cells', type=click.Choice(rc.MORTALITY_CELLS),
+              default='all', show_default=True,
+              help='Cells of the mortality target: all, outside the '
+                   'flight-line mask (unmasked), or unmasked with both '
+                   'cohorts (common)')
 @click.option('--tag', default='', help='Suffix of the output files')
 def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
          n_boot, structures, ablation, traits_path, cwc_path, trait_year,
          line_z, neighbour, neighbour_radius, raw_block_path, save_preds,
-         gains_only, fold_seed, tag):
+         gains_only, fold_seed, mortality_source, mortality_cells, tag):
     rc.FOLD_SEED = fold_seed
     if (traits_path or cwc_path or raw_block_path) and len(aois) > 1:
         raise click.UsageError('--traits/--cwc/--raw-block take a single '
@@ -495,7 +515,7 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
             scale_m = rc.RES * k
             paths = trait_paths(aoi, traits_path, cwc_path)
             d = build(aoi, k, response_dir, dynamics_dir, paths, trait_year,
-                      line_z)
+                      line_z, mortality_source, mortality_cells)
             if raw_block_path:
                 d = raw_block(d, aoi, k, raw_block_path, trait_year)
             if neighbour:

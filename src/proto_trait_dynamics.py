@@ -83,7 +83,12 @@ def crosstrack_normalize(a, line, elev, transform):
 
 def lidar_cohort(transform, shape):
     """Per-pixel counts of cohort-A trees (live 2013, same status 2017 and
-    2018) and of those dead by 2017"""
+    2018) and of those dead by 2017.
+
+    Pixels without cohort trees count 0 in both layers, so the cell means
+    give died/n = Σdied/Σn and n * n_px = Σn. (Before 2026-10-09 they were
+    NaN in n only, which biased the fraction low and the count high in cells
+    with treeless pixels.)"""
     from proto_predisposition_neon import load_trees, pixel_index
     df = load_trees(rc.E / 'hemming_schroeder2023')
     a = df[(df.live2013 == 1) & (df.live2017 == df.live2018)
@@ -94,9 +99,7 @@ def lidar_cohort(transform, shape):
     n = np.bincount(idx, minlength=shape[0] * shape[1]).astype(float)
     died = np.bincount(idx, weights=(a.live2017.values[ok] == 0),
                        minlength=shape[0] * shape[1])
-    n, died = n.reshape(shape), died.reshape(shape)
-    n[n == 0], died[n == 0] = np.nan, np.nan
-    return n, died
+    return n.reshape(shape), died.reshape(shape)
 
 
 def build(aoi, k, response_dir, variant_june='c2'):

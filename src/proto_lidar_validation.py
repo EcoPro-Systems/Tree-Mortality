@@ -15,6 +15,9 @@ used to control for?
    gain means ASO records the die-off itself. Also the within-strata ρ of
    each ASO variable with the mortality fraction.
 3. Maps of the main height variables.
+--mortality-source / --mortality-cells swap the mortality target as in
+proto_response_traits.py (e.g. the NAIP-based cohort of
+proto_stovall_check.py); the agreement tables do not depend on them.
 
     python proto_lidar_validation.py $E/hls_results/lidar_check
 """
@@ -44,7 +47,8 @@ PAIRS = [('lidar_h_mean', 'aso_chm_mean'), ('lidar_h_p90', 'aso_rh98'),
 ELEV_BAND = 200
 
 
-def cells(aoi, k, response_dir, dynamics_dir):
+def cells(aoi, k, response_dir, dynamics_dir, mortality_source='dynamics',
+          mortality_cells='all'):
     env = rc.open_env(aoi)
     valid = rc.undisturbed(env, 2019)
     lid = xr.open_dataset(rc.E / 'lidar' / f'{aoi}_lidar.nc')
@@ -69,6 +73,9 @@ def cells(aoi, k, response_dir, dynamics_dir):
         dd = pd.read_csv(dyn, usecols=lambda c: c in (
             'cell_row', 'cell_col', 'mort_frac', 'mort_n'))
         d = d.merge(dd, on=['cell_row', 'cell_col'], how='left')
+    if aoi == AOI:
+        d = rc.mortality_target(d, aoi, k, mortality_source,
+                                mortality_cells)
     return d
 
 
@@ -100,7 +107,11 @@ def fig_maps(aoi, path):
 @click.command()
 @click.argument('outputdir', type=click.Path(path_type=Path))
 @click.option('--n-boot', default=1000, show_default=True)
-def main(outputdir, n_boot):
+@click.option('--mortality-source', type=click.Choice(rc.MORTALITY_SOURCES),
+              default='dynamics', show_default=True)
+@click.option('--mortality-cells', type=click.Choice(rc.MORTALITY_CELLS),
+              default='all', show_default=True)
+def main(outputdir, n_boot, mortality_source, mortality_cells):
     outputdir.mkdir(parents=True, exist_ok=True)
     E = rc.E / 'hls_results'
     dirs = {AOI: (E / 'response', E / 'trait_dynamics'),
@@ -111,7 +122,7 @@ def main(outputdir, n_boot):
         for k in (3, 9):
             if not (rdir / f'metrics_{aoi}_{rc.RES * k}m.csv').exists():
                 continue
-            d = cells(aoi, k, rdir, ddir)
+            d = cells(aoi, k, rdir, ddir, mortality_source, mortality_cells)
             for a, b in PAIRS:
                 ok = d[a].notna() & d[b].notna()
                 if ok.sum() < 100:
@@ -126,7 +137,8 @@ def main(outputdir, n_boot):
             # Leakage on the NEON lidar-tree cells
             es = ENV + S_WALL
             for src, L in (('aso', S_ASO), ('lvis2008', S_LVIS)):
-                sub = d[d.mort_frac.notna() & d[L[0]].notna()]
+                sub = d[d.mort_frac.notna() & d[L[0]].notna()
+                        & d.get('hs_ok', True)]
                 if len(sub) < 500:
                     continue
                 fs = {'Env+S': es, 'Env+S+Lneon': es + S_LIDAR,

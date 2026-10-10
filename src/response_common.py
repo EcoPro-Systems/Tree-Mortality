@@ -82,6 +82,45 @@ def undisturbed(env, last_year, first_year=2000, keep_salvage=False):
     return (env.forest.values == 1) & ~fire & ~cut.any(0)
 
 
+MORTALITY_SOURCES = ('dynamics', 'hs', 'stovall')
+MORTALITY_CELLS = ('all', 'unmasked', 'common')
+
+
+def mortality_target(d, aoi, k, source='dynamics', cells='all'):
+    """Choose the tree-mortality target held in mort_frac/mort_n.
+
+    source: dynamics  the lidar-tree fraction of proto_trait_dynamics.py
+                      (as in every run before the NAIP-based check)
+            hs        the same lidar-tree cohort gridded by
+                      proto_stovall_check.py
+            stovall   the NAIP-based cohort (proto_stovall_check.py)
+    cells:  all       every cell with a value
+            unmasked  inside the Queally et al. grid and outside its
+                      flight-line mask
+            common    unmasked, with both hs and stovall values
+    With hs or stovall, hs_ok marks the cells with the lidar-tree cohort
+    (where the NEON 2013 lidar structure exists)."""
+    if source == 'dynamics' and cells == 'all':
+        return d
+    f = (E / 'hls_results/stovall_check' /
+         f'stovall_{aoi}_{RES * k}m.csv')
+    s = pd.read_csv(f, usecols=['cell_row', 'cell_col', 'stov_frac',
+                                'stov_n', 'mort_frac', 'mort_n',
+                                'oblique_frac', 'q_frac'])
+    s = s.rename(columns={'mort_frac': 'hs_frac', 'mort_n': 'hs_n'})
+    d = d.merge(s, on=['cell_row', 'cell_col'], how='left')
+    if source != 'dynamics':
+        d['hs_ok'] = d.hs_frac.notna()
+        src = 'hs' if source == 'hs' else 'stov'
+        d['mort_frac'], d['mort_n'] = d[f'{src}_frac'], d[f'{src}_n']
+    if cells != 'all':
+        keep = (d.oblique_frac == 0) & (d.q_frac == 1)
+        if cells == 'common':
+            keep &= d.stov_frac.notna() & d.hs_frac.notna()
+        d.loc[~keep, ['mort_frac', 'mort_n']] = np.nan
+    return d.drop(columns=list(s.columns[2:]))
+
+
 def cell_table(layers, valid, k, min_valid=MIN_VALID,
                block_m=(1000, 5000)):
     """Cells of k x k pixels: block means of each 2D layer over valid pixels.
