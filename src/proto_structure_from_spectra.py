@@ -121,8 +121,13 @@ def no_lidar(d, source, T, W, n_boot, aoi, scale_m):
               default=rc.E / 'hls_results/trait_dynamics')
 @click.option('--scale', default=3, show_default=True)
 @click.option('--n-boot', default=1000, show_default=True)
+@click.option('--fold-seed', type=int, default=None,
+              help='Shuffle 1 km blocks into folds with this seed (default: '
+                   'the deterministic GroupKFold assignment)')
+@click.option('--tag', default='', help='Suffix of the output files')
 def main(outputdir, aois, sources, response_dir, dynamics_dir, scale,
-         n_boot):
+         n_boot, fold_seed, tag):
+    rc.FOLD_SEED = fold_seed
     outputdir.mkdir(parents=True, exist_ok=True)
     scale_m = rc.RES * scale
     skill_rows, ladder_rows = [], []
@@ -137,12 +142,14 @@ def main(outputdir, aois, sources, response_dir, dynamics_dir, scale,
             if len(sub) < 500:
                 continue
             click.echo(f'[{aoi} {scale_m} m] {src}: {len(sub)} cells')
-            skill_rows += structure_skill(sub, src, T, W, aoi, scale_m)
-            ladder_rows += no_lidar(sub, src, T, W, n_boot, aoi, scale_m)
+            skill_rows += [dict(x, fold_seed=fold_seed) for x in
+                           structure_skill(sub, src, T, W, aoi, scale_m)]
+            ladder_rows += [dict(x, fold_seed=fold_seed) for x in
+                            no_lidar(sub, src, T, W, n_boot, aoi, scale_m)]
             pd.DataFrame(skill_rows).to_csv(
-                outputdir / 'structure_skill.csv', index=False)
+                outputdir / f'structure_skill{tag}.csv', index=False)
             pd.DataFrame(ladder_rows).to_csv(
-                outputdir / 'no_lidar_ladder.csv', index=False)
+                outputdir / f'no_lidar_ladder{tag}.csv', index=False)
 
 
 if __name__ == '__main__':

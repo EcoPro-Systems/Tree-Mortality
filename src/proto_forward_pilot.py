@@ -40,12 +40,41 @@ composites. On the cells with every scene, paired:
     L1 vs T18 over Env+S and over Env+S+Leg (one date each)
     T18 beyond Env+S+L1, Env+S+Leg+L1, Env+S+Leg+L2 (and +LM)
     T18 vs T13 beyond Env+S+Leg+L1 (post- vs pre-drought traits)
+    T18 vs the second scene (or LM), each added beyond Env+S+Leg+L1
 and the within-stratum ρ (1 km block-bootstrap CIs) of N, LMA, lignin and
 cellulose residualized on Env+S and on Env+S+L1. The cycle-2 responses are
 Landsat 8/9 with a 2017-19 baseline, so a 2018 Landsat block shares
 sensor, processing and baseline years with them. Outputs landsat_<std>.csv
-and landsat_directions_<std>.csv; the runs without --landsat are
-unchanged.
+and landsat_directions_<std>.csv (--tag adds a suffix); the runs without
+--landsat are unchanged.
+
+Averaged-over-splits rule (--rule; dry run on the pilot AOIs of the test
+that the held-out sites will get). Each contrast is fitted under the fixed
+fold assignments response_common.FOLD_SEEDS with the tuned learner
+(hgb_tuned) on both arms, and the gain (or ρ) is averaged over them; its CI
+is the paired 1 km block-bootstrap CI of that average
+(bootstrap_r2_splits, rho_within_splits). It passes if the CI excludes 0.
+    skill      Env+S -> +Leg (legacy); Env+S+Leg -> +T18
+    directions within-stratum ρ of N, LMA, lignin and cellulose (2018)
+               with cycle-2 recovery: as standardized, and residualized
+               on Env+S, Env+S+L1, Env+S+Leg and Env+S+Leg+L1 (L1: the
+               Landsat 8 scene nearest the 2018 flight, --rule-scene);
+               also a structural-carbon score (StructC), the mean of
+               z-scored lignin and cellulose (of their residuals on each
+               base and fold assignment)
+    transfer   cycle-1 model (Env+S, Env+S+T13) applied to cycle 2 (T18
+               swapped in): rank ρ pooled and within elevation quartiles
+               (proto_heldout_strata cutpoints, computed from elevation
+               alone on the forest cells undisturbed through 2025)
+Outputs rule_ladder.csv, rule_directions.csv and rule_transfer.csv
+(--rule-directions-only: the directions alone). --conifer-only runs it on
+the cells that are >= 50% conifer (LANDFIRE 2014 EVT), with elevation
+strata from those cells: the definition on which the held-out sites are
+tested (proto_heldout_strata.test_cells, fixed in §39). --rule-subset adds
+direction rows on part of the cells (upper: the AOI's upper elevation
+quartile; highfir: >= 50% red fir and subalpine EVT), with the residuals
+still fitted on all of them; --rule-pool pools the directions over the
+AOIs (strata and 1 km blocks kept apart by AOI).
 
 Held-out AOIs (response_common.HELD_OUT) are refused.
 
@@ -91,14 +120,18 @@ def trait_block(aoi, valid, k, year, rank):
     return pd.concat([t[['cell_row', 'cell_col']], z], axis=1)
 
 
-def build(aoi, k, rank):
+def build(aoi, k, rank, conifer=False):
     env = rc.open_env(aoi)
     valid = rc.undisturbed(env, 2025)
     c1 = build_cycle(aoi, k, 1, valid)
     c2 = build_cycle(aoi, k, 2, valid)
     key = ['cell_row', 'cell_col']
+    if conifer:
+        from proto_heldout_strata import test_cells
+        keep = test_cells(aoi, k)
+        c1, c2 = c1.merge(keep, on=key), c2.merge(keep, on=key)
     leg = c1[key + TARGETS].rename(columns={t: f'leg_{t}' for t in TARGETS})
-    c1r = c1[key + TARGETS + ENV + S_WALL]
+    c1r = c1[key + ['block1000'] + TARGETS + ENV + S_WALL]
     d = c2.merge(leg, on=key)
     for y in (2013, 2018):
         tb = trait_block(aoi, valid, k, y, rank)
@@ -172,8 +205,11 @@ def landsat_control(d, aoi, k, scenes, composites, n_boot, dir_boot):
         if b in lb:
             fs[f'Env+S+Leg+{b}'] = es + legall + lb[b]
             fs[f'Env+S+Leg+{b}+T18'] = es + legall + lb[b] + T18
+            # one more Landsat scene (or the composites) vs the 2018 traits,
+            # each beyond Env+S+Leg+L1
             pairs += [('Env+S+Leg+L1', f'Env+S+Leg+{b}'),
-                      (f'Env+S+Leg+{b}', f'Env+S+Leg+{b}+T18')]
+                      (f'Env+S+Leg+{b}', f'Env+S+Leg+{b}+T18'),
+                      (f'Env+S+Leg+{b}', 'Env+S+Leg+L1+T18')]
     rows, drows = [], []
     strata = (d.arid.astype(str) + '_' +
               (d.elevation // ELEV_BAND).astype(int).astype(str))
@@ -215,6 +251,185 @@ def landsat_control(d, aoi, k, scenes, composites, n_boot, dir_boot):
     return rows, drows
 
 
+RULE_TRAITS = {'Nitrogen': 1, 'LMA': -1, 'Lignin': -1, 'Cellulose': -1}
+SCORE, SCORE_OF = 'StructC', ('Lignin', 'Cellulose')
+# --rule-subset: 'upper' (the AOI's upper elevation quartile) or cells
+# >= 50% in these LANDFIRE 2014 EVT groups
+SUBSETS = {'upper': None, 'highfir': ('red_fir', 'subalpine')}
+
+
+def zmean(d, cols):
+    """Mean of the z-scored columns (over the rows of d)"""
+    return sum((d[c] - d[c].mean()) / d[c].std() for c in cols) / len(cols)
+
+
+def direction_rows(dd, t, strata, rcols, bases, fold_seeds, dir_boot,
+                   signs, mask=None, **tags):
+    """Within-stratum ρ with target t of each 2018 trait, as standardized
+    and residualized on each base (averaged over the fold assignments),
+    optionally on a subset of the cells (mask)"""
+    from proto_trait_directions import rho_within_boot, rho_within_splits
+    if mask is not None:
+        dd, strata = dd[mask], strata[mask]
+    rows = []
+    for x, sign in signs.items():
+        col = f'T_{x}_18'
+        u = rc.within_strata_rho(dd, [col], t, strata)[0]
+        lo, hi = rho_within_boot(dd, col, t, strata, dd.block1000, dir_boot)
+        rows.append(dict(target=t, trait=x, residual_on='none',
+                         expected_sign=sign, fold_seed='none',
+                         rho_within=u['rho_within'], lo=lo, hi=hi,
+                         n=u['n'], n_strata=u['n_strata'], **tags))
+        for bn in bases:
+            cols = [rcols[(x, bn, f)] for f in fold_seeds]
+            v = rho_within_splits(dd, cols, t, strata, dd.block1000,
+                                  dir_boot)
+            rows.append(dict(target=t, trait=x, residual_on=bn,
+                             expected_sign=sign, fold_seed='mean',
+                             rho_within=v['rho_within'], lo=v['lo'],
+                             hi=v['hi'], n=u['n'], n_strata=u['n_strata'],
+                             **tags))
+            for f, (est, lo, hi) in zip(fold_seeds, v['per_split']):
+                rows.append(dict(target=t, trait=x, residual_on=bn,
+                                 expected_sign=sign, fold_seed=f,
+                                 rho_within=est, lo=lo, hi=hi, n=u['n'],
+                                 n_strata=u['n_strata'], **tags))
+    for bn in ['none'] + list(bases):
+        click.echo(f'    directions {tags.get("subset", "all"):7s}| '
+                   f'{bn:13s} ' + '  '.join(
+                       f'{y["trait"][:4]} {y["rho_within"]:+.2f} '
+                       f'[{y["lo"]:+.2f},{y["hi"]:+.2f}]' for y in rows
+                       if y['residual_on'] == bn
+                       and y['fold_seed'] in ('mean', 'none')))
+    return rows
+
+
+def rule_check(d, c1, aoi, k, targets, scene, fold_seeds, n_boot, dir_boot,
+               learner, resid_learner, directions_only=False,
+               conifer=False, subsets=()):
+    """The averaged-over-splits rule on one AOI; returns (ladder rows,
+    direction rows, transfer rows, pool). directions_only skips the skill
+    and transfer parts. subsets (SUBSETS names) adds direction rows on
+    those cells, with the residuals fitted on all cells; pool holds what
+    pooling the directions over AOIs needs."""
+    from scipy.stats import spearmanr
+    from proto_heldout_strata import (elevation_cells, elevation_cutpoints,
+                                      elevation_stratum, group_share)
+    n0 = len(d)
+    d, lb = landsat_cols(d, aoi, k, [scene], False)
+    click.echo(f'[{aoi}] rule: {len(d)} of {n0} cells with {scene}; '
+               f'fold seeds {", ".join(map(str, fold_seeds))}; {learner}')
+    T13 = [f'T_{x}_13' for x in TRAITS] + ['T_qcfc_13']
+    T18 = [f'T_{x}_18' for x in TRAITS] + ['T_qcfc_18']
+    es = ENV + S_WALL
+    legall = [f'leg_{x}' for x in TARGETS]
+    L1 = lb['L1']
+    fs = {'Env+S': es, 'Env+S+Leg': es + legall,
+          'Env+S+Leg+T18': es + legall + T18}
+    pairs = [('Env+S', 'Env+S+Leg'), ('Env+S+Leg', 'Env+S+Leg+T18')]
+    strata = (d.arid.astype(str) + '_' +
+              (d.elevation // ELEV_BAND).astype(int).astype(str))
+    bases = {'Env+S': es, 'Env+S+L1': es + L1, 'Env+S+Leg': es + legall,
+             'Env+S+Leg+L1': es + legall + L1}
+    keys = [(x, bn, fs_) for x in RULE_TRAITS for bn in bases
+            for fs_ in fold_seeds]
+    R = dict(zip(keys, rc.pmap(rc.crossfit_residuals, [
+        dict(df=d, target=f'T_{x}_18', cols=bases[bn], blocks='block1000',
+             learner=resid_learner, fold_seed=fs_) for x, bn, fs_ in keys])))
+    rcols = {key: f'R_{key[0]}|{key[1]}|{key[2]}' for key in R}
+    dd = pd.concat([d, pd.DataFrame({rcols[key]: v for key, v in R.items()},
+                                    index=d.index)], axis=1)
+    # structural-carbon score: mean of z-scored lignin and cellulose, on
+    # the traits as standardized and on each set of residuals
+    sc = {f'T_{SCORE}_18': zmean(dd, [f'T_{x}_18' for x in SCORE_OF])}
+    for bn in bases:
+        for fs_ in fold_seeds:
+            rcols[(SCORE, bn, fs_)] = f'R_{SCORE}|{bn}|{fs_}'
+            sc[rcols[(SCORE, bn, fs_)]] = zmean(
+                dd, [rcols[(x, bn, fs_)] for x in SCORE_OF])
+    dd = pd.concat([dd, pd.DataFrame(sc, index=dd.index)], axis=1)
+    directions = dict(RULE_TRAITS, **{SCORE: -1})
+    cuts = elevation_cutpoints(
+        elevation_cells(aoi, k, conifer=conifer).elevation.values)
+    masks = {'all': np.ones(len(dd), bool)}
+    for name in subsets:
+        if name == 'upper':  # the AOI's upper elevation quartile
+            masks[name] = (elevation_stratum(dd.elevation.values, cuts)
+                           == len(cuts))
+        else:  # >= 50% of the cell in these EVT groups
+            g = group_share(aoi, SUBSETS[name], k)
+            share = dd[['cell_row', 'cell_col']].merge(
+                g, on=['cell_row', 'cell_col'], how='left').share.values
+            masks[name] = share >= 0.5
+        click.echo(f'  subset {name}: {masks[name].sum()} cells' + (
+            f' (elevation >= {cuts[-1]:.0f} m)' if name == 'upper' else ''))
+    lrows, drows, trows = [], [], []
+    for t in targets:
+        sub = d[d[t].notna() & np.isfinite(d[t])]
+        click.echo(f'  {t} n={len(sub)}')
+        r = [] if directions_only else rc.ladder_splits(
+            sub, t, fs, 'block1000', fold_seeds, n_boot=n_boot, pairs=pairs,
+            learner=learner)[0]
+        lrows += r
+        for x in r:
+            if x['compare'] and x['fold_seed'] == 'mean':
+                per = [y['r2'] for y in r if y['compare'] == x['compare']
+                       and y['features'] == x['features']
+                       and y['fold_seed'] != 'mean']
+                click.echo(f'    {x["features"]:15s} - {x["compare"]:10s} '
+                           f'{x["r2"]:+.3f} [{x["lo"]:+.3f},{x["hi"]:+.3f}]'
+                           f'  splits {min(per):+.3f} to {max(per):+.3f}')
+        if not t.endswith('recovery'):
+            continue
+        for name, m in masks.items():
+            drows += direction_rows(
+                dd, t, strata, rcols, bases, fold_seeds, dir_boot,
+                directions, None if name == 'all' else m, subset=name)
+        if directions_only:
+            continue
+
+        # cycle 1 -> cycle 2, pooled and within elevation quartiles
+        a = c1[c1[t].notna()]
+        q = elevation_stratum(sub.elevation.values, cuts)
+        for name, cols_a, cols_b in (('Env+S', es, es),
+                                     ('Env+S+T', es + T13, es + T18)):
+            m = rc.fit_model(learner,
+                             a[cols_a].set_axis(generic(cols_a), axis=1),
+                             a[t].values, groups=a.block1000.values)
+            p = m.predict(sub[cols_b].set_axis(generic(cols_b), axis=1))
+            for g in ['all'] + list(range(len(cuts) + 1)):
+                ok = np.ones(len(sub), bool) if g == 'all' else q == g
+                y, b = sub[t].values[ok], sub.block1000.values[ok]
+                lo, hi = rank_boot(y, p[ok], b, n_boot)
+                trows.append(dict(target=t, features=name,
+                                  elev_stratum=g if g == 'all' else
+                                  f'q{g + 1}', n=int(ok.sum()),
+                                  rho=spearmanr(y, p[ok])[0], lo=lo, hi=hi))
+        click.echo('    transfer rho ' + '  '.join(
+            f'{y["features"]}|{y["elev_stratum"]} {y["rho"]:+.2f}'
+            for y in trows if y['target'] == t))
+    keep = (['block1000'] + list(targets) +
+            [f'T_{x}_18' for x in directions] + list(rcols.values()))
+    pool = dict(dd=dd[keep].assign(**{f'in_{n}': m for n, m in
+                                      masks.items()}),
+                strata=strata, rcols=rcols, bases=list(bases),
+                signs=directions)
+    return lrows, drows, trows, pool
+
+
+def rank_boot(y, p, blocks, n_boot, seed=0):
+    """1 km block-bootstrap percentiles of Spearman ρ(y, p)"""
+    from scipy.stats import rankdata
+    ry, rp = rankdata(y), rankdata(p)
+    codes, inv = np.unique(blocks, return_inverse=True)
+    m = rc.block_draws(len(codes), n_boot, seed)[:, inv]
+    sw = m.sum(1)
+    mx, my = (m @ rp) / sw, (m @ ry) / sw
+    cov = (m @ (rp * ry)) / sw - mx * my
+    vx, vy = (m @ (rp * rp)) / sw - mx ** 2, (m @ (ry * ry)) / sw - my ** 2
+    return tuple(np.percentile(cov / np.sqrt(vx * vy), [2.5, 97.5]))
+
+
 @click.command()
 @click.argument('outputdir', type=click.Path(path_type=Path))
 @click.option('-a', '--aoi', 'aois', multiple=True, required=True)
@@ -229,25 +444,100 @@ def landsat_control(d, aoi, k, scenes, composites, n_boot, dir_boot):
               help='Also the 2018 June and Jul-Sep Landsat 8 composites')
 @click.option('--dir-boot', default=500, show_default=True,
               help='Bootstrap draws for the direction CIs')
+@click.option('--tag', default='', help='Suffix of the output files')
+@click.option('--fold-seed', type=int,
+              help='Shuffle 1 km blocks into folds with this seed (default: '
+                   'the deterministic GroupKFold assignment)')
+@click.option('--rule', is_flag=True,
+              help='The averaged-over-splits rule (see above)')
+@click.option('--rule-scene', default='20180619', show_default=True,
+              help='Landsat 8 scene nearest the 2018 flight (--rule)')
+@click.option('-t', '--target', 'targets', multiple=True, default=TARGETS,
+              show_default=True, help='Targets of --rule')
+@click.option('--learner', default='hgb_tuned', show_default=True,
+              help='Learner of the --rule skill contrasts and transfer')
+@click.option('--resid-learner', default='hgb', show_default=True,
+              help='Learner of the --rule trait residuals')
+@click.option('--rule-directions-only', is_flag=True,
+              help='--rule without the skill and transfer parts')
+@click.option('--conifer-only', is_flag=True,
+              help='--rule on cells >= 50%% conifer (LANDFIRE 2014 EVT; '
+                   'proto_heldout_strata --conifer), elevation strata '
+                   'from those cells')
+@click.option('--rule-subset', 'subsets', multiple=True,
+              type=click.Choice(list(SUBSETS)),
+              help='--rule directions also on these cells (residuals '
+                   'fitted on all): upper (upper elevation quartile) or '
+                   'highfir (>= 50%% red fir and subalpine EVT)')
+@click.option('--rule-pool', is_flag=True,
+              help='--rule directions also pooled over the AOIs '
+                   '(within-AOI strata, blocks resampled jointly)')
 def main(outputdir, aois, scale, rank, n_boot, scenes, landsat_composites,
-         dir_boot):
+         dir_boot, tag, fold_seed, rule, rule_scene, targets, learner,
+         resid_learner, rule_directions_only, conifer_only, subsets,
+         rule_pool):
+    rc.FOLD_SEED = fold_seed
     outputdir.mkdir(parents=True, exist_ok=True)
     scale_m = rc.RES * scale
     std = 'rank' if rank else 'z'
     ladder_rows, transfer_rows, rho_rows = [], [], []
+    if rule:
+        out = {'ladder': [], 'directions': [], 'transfer': []}
+        pools = {}
+        for aoi in aois:
+            d, c1 = build(aoi, scale, rank, conifer_only)
+            tags = dict(aoi=aoi, scale_m=scale_m, standardize=std,
+                        learner=learner, scene=rule_scene,
+                        cells='conifer' if conifer_only else 'all')
+            *res, pools[aoi] = rule_check(
+                d, c1, aoi, scale, list(targets), rule_scene,
+                rc.FOLD_SEEDS, n_boot, dir_boot, learner, resid_learner,
+                rule_directions_only, conifer_only, subsets)
+            for name, rows in zip(out, res):
+                out[name] += [dict(x, **tags) for x in rows]
+                pd.DataFrame(out[name]).to_csv(
+                    outputdir / f'rule_{name}{tag}.csv', index=False)
+        if rule_pool and len(aois) > 1:
+            # within-AOI strata and 1 km blocks, the AOIs' cells together
+            p0 = pools[aois[0]]
+            dd = pd.concat([p['dd'].assign(
+                block1000=a + '_' + p['dd'].block1000.astype(str))
+                for a, p in pools.items()], ignore_index=True)
+            strata = pd.concat([a + '_' + p['strata'].astype(str)
+                                for a, p in pools.items()],
+                               ignore_index=True)
+            tags = dict(aoi='+'.join(aois), scale_m=scale_m,
+                        standardize=std, learner=learner, scene=rule_scene,
+                        cells='conifer' if conifer_only else 'all')
+            click.echo(f'[{tags["aoi"]}] pooled directions')
+            for t in targets:
+                if not t.endswith('recovery'):
+                    continue
+                click.echo(f'  {t}')
+                for name in ['all', *subsets]:
+                    rows = direction_rows(
+                        dd, t, strata, p0['rcols'], p0['bases'],
+                        rc.FOLD_SEEDS, dir_boot, p0['signs'],
+                        dd[f'in_{name}'].values, subset=name)
+                    out['directions'] += [dict(x, **tags) for x in rows]
+            pd.DataFrame(out['directions']).to_csv(
+                outputdir / f'rule_directions{tag}.csv', index=False)
+        return
     if scenes:
         lrows, drows = [], []
         for aoi in aois:
             d, _ = build(aoi, scale, rank)
-            tags = dict(aoi=aoi, scale_m=scale_m, standardize=std)
+            tags = dict(aoi=aoi, scale_m=scale_m, standardize=std,
+                        fold_seed=fold_seed)
             r, dr = landsat_control(d, aoi, scale, list(scenes),
                                     landsat_composites, n_boot, dir_boot)
             lrows += [dict(x, **tags) for x in r]
             drows += [dict(x, **tags) for x in dr]
-            pd.DataFrame(lrows).to_csv(outputdir / f'landsat_{std}.csv',
-                                       index=False)
+            pd.DataFrame(lrows).to_csv(
+                outputdir / f'landsat_{std}{tag}.csv', index=False)
             pd.DataFrame(drows).to_csv(
-                outputdir / f'landsat_directions_{std}.csv', index=False)
+                outputdir / f'landsat_directions_{std}{tag}.csv',
+                index=False)
         return
     for aoi in aois:
         d, c1 = build(aoi, scale, rank)
@@ -258,7 +548,8 @@ def main(outputdir, aois, scale, rank, n_boot, scenes, landsat_composites,
         T13 = [f'T_{x}_13' for x in TRAITS] + ['T_qcfc_13']
         T18 = [f'T_{x}_18' for x in TRAITS] + ['T_qcfc_18']
         es = ENV + S_WALL
-        tags = dict(aoi=aoi, scale_m=scale_m, standardize=std)
+        tags = dict(aoi=aoi, scale_m=scale_m, standardize=std,
+                    fold_seed=fold_seed)
         for t in TARGETS:
             leg = [f'leg_{t}']
             legall = [f'leg_{x}' for x in TARGETS]
@@ -311,7 +602,7 @@ def main(outputdir, aois, scale, rank, n_boot, scenes, landsat_composites,
         for name, rows in (('ladder', ladder_rows),
                            ('transfer', transfer_rows),
                            ('directions', rho_rows)):
-            pd.DataFrame(rows).to_csv(outputdir / f'{name}_{std}.csv',
+            pd.DataFrame(rows).to_csv(outputdir / f'{name}_{std}{tag}.csv',
                                       index=False)
 
 

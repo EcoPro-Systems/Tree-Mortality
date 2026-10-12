@@ -85,6 +85,10 @@ def build_cycle(aoi, k, c, valid, allow_held_out=False):
     d = pd.concat([d.drop(columns=[c for c in d.columns if c.startswith(
         tuple(f'{v}_' for v in INDICES))]), pd.DataFrame(m, index=d.index)],
         axis=1)
+    if c == 2 and aoi in rc.HELD_OUT:
+        # a held-out site is tested on its fixed test cells only (§39)
+        from proto_heldout_strata import test_cells
+        d = d.merge(test_cells(aoi, k), on=['cell_row', 'cell_col'])
     return d.assign(cycle=c)
 
 

@@ -22,7 +22,10 @@ for the drought-response experiments.
   records are mortality reports, not treatments, and are left out.
 
 Output is <outputdir>/<aoi>_env.nc with static (y, x) layers and
-(year, y, x) climate and burned layers.
+(year, y, x) climate and burned layers. --masks-only keeps NLCD, terrain
+and the burned and harvest layers only (no climate or structure), for large
+grids that so far need only the forest and disturbance masks (the held-out
+sites in config/heldout_aois.yml, with their own --disturbance-dir).
 
     python aoi_env_layers.py ../config/hls_aois.yml $E/env -a neon_soap_teak
 """
@@ -211,7 +214,7 @@ def burned_layers(transform, shape, epsg, years):
     return out, g[['event_id', 'incid_name', 'year']]
 
 
-def disturbance_layers(transform, shape, epsg, years):
+def disturbance_layers(transform, shape, epsg, years, ddir=DISTURBANCE):
     """FRAP fires, prescribed burns, harvests and salvage cuts per year"""
     def per_year(g):
         g = g[g.geometry.notna()].to_crs(f'EPSG:{epsg}')
@@ -224,11 +227,11 @@ def disturbance_layers(transform, shape, epsg, years):
                                    default_value=1)
         return out
 
-    frap = gpd.read_file(DISTURBANCE / 'frap_fires.gpkg')
+    frap = gpd.read_file(ddir / 'frap_fires.gpkg')
     frap['year'] = pd.to_numeric(frap.YEAR_, errors='coerce')
-    rx = gpd.read_file(DISTURBANCE / 'rx_fires.gpkg')
+    rx = gpd.read_file(ddir / 'rx_fires.gpkg')
     rx['year'] = pd.to_numeric(rx.YEAR_, errors='coerce')
-    h = gpd.read_file(DISTURBANCE / 'facts_harvest.gpkg')
+    h = gpd.read_file(ddir / 'facts_harvest.gpkg')
     h['year'] = pd.to_datetime(h.date_completed, unit='ms',
                                errors='coerce').dt.year
     h = h[~h.activity_name.str.startswith('Natural Changes', na=False)]
@@ -246,9 +249,16 @@ def disturbance_layers(transform, shape, epsg, years):
 @click.option('--burn-years', nargs=2, type=int, default=(2000, 2025),
               show_default=True)
 @click.option('--project', default='ecopro-509818', show_default=True)
-def main(configfile, outputdir, names, years, burn_years, project):
-    ee.Initialize(project=project,
-                  opt_url='https://earthengine-highvolume.googleapis.com')
+@click.option('--masks-only', is_flag=True,
+              help='NLCD, terrain, burned and harvest layers only')
+@click.option('--disturbance-dir', type=click.Path(path_type=Path),
+              default=DISTURBANCE, show_default=True,
+              help='GeoPackages of fetch_disturbance_aois.py')
+def main(configfile, outputdir, names, years, burn_years, project,
+         masks_only, disturbance_dir):
+    if not masks_only:
+        ee.Initialize(project=project,
+                      opt_url='https://earthengine-highvolume.googleapis.com')
     config = load_config(configfile)
     outputdir.mkdir(parents=True, exist_ok=True)
     yrs = list(range(years[0], years[1] + 1))
@@ -266,18 +276,21 @@ def main(configfile, outputdir, names, years, burn_years, project):
         static['forest'] = np.isin(lc[0], FOREST).astype(np.uint8)
         static.update(topo_layers(transform, shape, epsg))
         click.echo(f'[{name}] terrain done ({time.time() - t0:.0f}s)')
-        static.update(ee_structure(transform, shape, epsg))
-        click.echo(f'[{name}] structure done ({time.time() - t0:.0f}s)')
-        if name == 'neon_soap_teak':
-            static.update(lidar_structure(transform, shape))
-            click.echo(f'[{name}] lidar done ({time.time() - t0:.0f}s)')
-        clim = bcm_layers(transform, shape, epsg, yrs)
-        static['bcm_cell'] = clim.pop('bcm_cell')
-        for k in [k for k in clim if k.endswith('_clim')]:
-            static[k] = clim.pop(k)
-        click.echo(f'[{name}] climate done ({time.time() - t0:.0f}s)')
+        clim = {}
+        if not masks_only:
+            static.update(ee_structure(transform, shape, epsg))
+            click.echo(f'[{name}] structure done ({time.time() - t0:.0f}s)')
+            if name == 'neon_soap_teak':
+                static.update(lidar_structure(transform, shape))
+                click.echo(f'[{name}] lidar done ({time.time() - t0:.0f}s)')
+            clim = bcm_layers(transform, shape, epsg, yrs)
+            static['bcm_cell'] = clim.pop('bcm_cell')
+            for k in [k for k in clim if k.endswith('_clim')]:
+                static[k] = clim.pop(k)
+            click.echo(f'[{name}] climate done ({time.time() - t0:.0f}s)')
         burned, fires = burned_layers(transform, shape, epsg, byrs)
-        dist = disturbance_layers(transform, shape, epsg, byrs)
+        dist = disturbance_layers(transform, shape, epsg, byrs,
+                                  disturbance_dir)
 
         xs, ys = cell_centers(transform, shape)
         ds = xr.Dataset(
@@ -287,7 +300,8 @@ def main(configfile, outputdir, names, years, burn_years, project):
                 for k, v in clim.items()},
              'burned': (('burn_year', 'y', 'x'), burned),
              **{k: (('burn_year', 'y', 'x'), v) for k, v in dist.items()}},
-            coords={'year': yrs, 'burn_year': byrs, 'y': ys, 'x': xs},
+            coords={**({'year': yrs} if clim else {}), 'burn_year': byrs,
+                    'y': ys, 'x': xs},
             attrs={'crs': f'EPSG:{epsg}', 'transform': list(transform)[:6],
                    'climate': 'BCMv8 water years, nearest 270 m cell',
                    'clim_years': list(CLIM_YEARS),

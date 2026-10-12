@@ -176,7 +176,12 @@ def common(f):
                               '<aoi>_l8_<date>.nc)'),
             click.option('-t', '--target', 'targets', multiple=True,
                          default=TARGETS, show_default=True),
-            click.option('--n-boot', default=1000, show_default=True)]):
+            click.option('--n-boot', default=1000, show_default=True),
+            click.option('--fold-seed', type=int, default=None,
+                         help='Shuffle 1 km blocks into folds with this '
+                              'seed (default: GroupKFold assignment)'),
+            click.option('--tag', default='',
+                         help='Suffix for the output file names')]):
         f = opt(f)
     return f
 
@@ -252,19 +257,22 @@ def spaceborne_stack(d, cols, source, targets, refs, n_boot):
               show_default=True)
 @click.option('--structure', 'sources', multiple=True,
               default=['aso', 'lvis2008'], show_default=True)
-def compare(outputdir, aois, scale, scene, targets, n_boot, configs, refs,
-            stack_configs, sources):
+@click.option('--no-stack', is_flag=True,
+              help='Head to head only, without the spaceborne stacks')
+def compare(outputdir, aois, scale, scene, targets, n_boot, fold_seed, tag,
+            configs, refs, stack_configs, sources, no_stack):
     """Spaceborne-like VSWIR vs Landsat without lidar"""
     outputdir.mkdir(parents=True, exist_ok=True)
+    rc.FOLD_SEED = fold_seed
     h2h, stk = [], []
     for aoi in aois:
         d, cols = blocks(aoi, scale, configs, scene)
-        tags = dict(aoi=aoi, scale_m=rc.RES * scale)
+        tags = dict(aoi=aoi, scale_m=rc.RES * scale, fold_seed=fold_seed)
         click.echo(f'[{aoi}] over Env+S')
         h2h += [dict(x, **tags) for x in headtohead(d, cols, targets, refs,
                                                     n_boot)]
-        save(h2h, outputdir / 'headtohead.csv')
-        for src in sources:
+        save(h2h, outputdir / f'headtohead{tag}.csv')
+        for src in ([] if no_stack else sources):
             sub = structure_cells(d, aoi, scale, src)
             if len(sub) < 500:
                 continue
@@ -272,7 +280,7 @@ def compare(outputdir, aois, scale, scene, targets, n_boot, configs, refs,
             sc = {c: cols[c] for c in stack_configs}
             stk += [dict(x, source=src, **tags) for x in spaceborne_stack(
                 sub, sc, src, targets, refs, n_boot)]
-            save(stk, outputdir / 'stack.csv')
+            save(stk, outputdir / f'stack{tag}.csv')
 
 
 # -------------------------------------------------------------- carbon
@@ -325,12 +333,13 @@ def carbon_ladder(d, cols, targets, n_boot):
     return rows
 
 
-def carbon_directions(d, cols, targets, n_boot):
+def carbon_directions(d, cols, targets, n_boot, resid_landsat=('l8raw',)):
     strata = strata_of(d)
     emu = [c for c in cols if c not in LANDSAT]
     rows = []
-    for bname, base in (('Env+S', ENV + S_WALL),
-                        ('Env+S+l8raw', ENV + S_WALL + cols['l8raw'])):
+    bases = [('Env+S', ENV + S_WALL)] + \
+        [(f'Env+S+{r}', ENV + S_WALL + cols[r]) for r in resid_landsat]
+    for bname, base in bases:
         R = {f'{c}:R_{x}': rc.crossfit_residuals(d, f'{c}:{x}', base,
                                                  'block1000')
              for c in emu for x in SC + NL}
@@ -363,24 +372,34 @@ def carbon_directions(d, cols, targets, n_boot):
               show_default=True)
 @click.option('--dir-boot', default=500, show_default=True,
               help='Bootstrap draws for the direction CIs')
-def carbon(outputdir, aois, scale, scene, targets, n_boot, configs,
-           dir_boot):
+@click.option('--resid-landsat', multiple=True, default=['l8raw'],
+              show_default=True,
+              help='Landsat blocks to residualize on, each beside Env+S')
+@click.option('--skip-ladder', is_flag=True,
+              help='Directions only')
+def carbon(outputdir, aois, scale, scene, targets, n_boot, fold_seed, tag,
+           configs, dir_boot, resid_landsat, skip_ladder):
     """Is structural carbon a VSWIR signal?"""
     outputdir.mkdir(parents=True, exist_ok=True)
+    rc.FOLD_SEED = fold_seed
     lad, dirs = [], []
     for aoi in aois:
         d, cols = blocks(aoi, scale, configs, scene)
-        tags = dict(aoi=aoi, scale_m=rc.RES * scale)
-        click.echo(f'[{aoi}] structural carbon and leaf economics blocks')
-        ladder_cols = {c: v for c, v in cols.items() if c != 'maps'}
-        lad += [dict(x, **tags) for x in carbon_ladder(
-            d, ladder_cols, [t for t in targets if t != 'ndmi_sens'],
-            n_boot)]
-        save(lad, outputdir / 'carbon_ladder.csv')
+        tags = dict(aoi=aoi, scale_m=rc.RES * scale, fold_seed=fold_seed,
+                    scene=scene)
+        if not skip_ladder:
+            click.echo(f'[{aoi}] structural carbon and leaf economics '
+                       'blocks')
+            ladder_cols = {c: v for c, v in cols.items() if c != 'maps'}
+            lad += [dict(x, **tags) for x in carbon_ladder(
+                d, ladder_cols, [t for t in targets if t != 'ndmi_sens'],
+                n_boot)]
+            save(lad, outputdir / f'carbon_ladder{tag}.csv')
         click.echo(f'[{aoi}] residual-trait directions')
         dirs += [dict(x, **tags) for x in carbon_directions(
-            d, cols, [t for t in targets if t != 'ndmi_sens'], dir_boot)]
-        save(dirs, outputdir / 'carbon_directions.csv')
+            d, cols, [t for t in targets if t != 'ndmi_sens'], dir_boot,
+            resid_landsat)]
+        save(dirs, outputdir / f'carbon_directions{tag}.csv')
 
 
 if __name__ == '__main__':

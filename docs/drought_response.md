@@ -24,11 +24,13 @@ analysed the same way.
 |---|---|---|
 | Landsat C2 L2 summer and June composites | `landsat_composites/<aoi>_<variant>_doy{182-273,145-190}.nc` | From `fetch_landsat_c2_ee.py` (Earth Engine). 2008–2025. Variants: `c2` (L5/7/8/9), `c2l7` (Landsat 7 only, to 2022), `c2oli` (Landsat 8/9 only) |
 | Env, terrain, structure, masks | `env/<aoi>_env.nc` | From `aoi_env_layers.py`. BCMv8 water-year CWD/AET/PET/PPT/Tmax and SPEI1–4 (2008–2024, nearest 270 m cell); local SRTM terrain indices (`topo/generated/`); GLAD height 2010, TCC 2010/2013, LANDFIRE 2014 EVH/EVC; NEON lidar tree summaries; NLCD 2013 forest; per-year fire (MTBS, CAL FIRE FRAP, CAL FIRE prescribed burns) and FACTS harvest/salvage, 2000–2025 |
-| Fire and harvest polygons | `fire/disturbance/{frap_fires,rx_fires,facts_harvest}.gpkg` | From `fetch_disturbance_aois.py`: CAL FIRE FRAP perimeters (all sizes), CAL FIRE prescribed-fire perimeters, USFS FACTS timber-harvest activities (EDW) |
+| Fire and harvest polygons | `fire/disturbance/{frap_fires,rx_fires,facts_harvest}.gpkg`; `fire/disturbance_heldout/` for the held-out grids | From `fetch_disturbance_aois.py`: CAL FIRE FRAP perimeters (all sizes), CAL FIRE prescribed-fire perimeters, USFS FACTS timber-harvest activities (EDW) |
+| Held-out site grids and masks | `config/heldout_aois.yml`; `env/{seki,yosemite_rest}_{env,mask}.nc`; `geom/seki_boundary.geojson` | From `fetch_heldout_masks.py` (2013 and 2018 trait-mosaic footprints, NPS SEQU/KICA boundary) and `aoi_env_layers.py --masks-only` (NLCD, terrain, fire and harvest only). Elevation strata: `config/heldout_strata.yml` (`proto_heldout_strata.py`); candidate variants in `hls_results/heldout_variants/`. Forest type: `env/{seki,yosemite_rest}_ftype.nc` (`fetch_forest_type.py ../config/heldout_aois.yml`) |
 | AVIRIS flight-line inventory | `aviris_locator/AVIRIS-{C,NG}_flight_{table.csv,s.geojson}` | [ORNL DAAC 2140](https://doi.org/10.3334/ORNLDAAC/2140) flight tables (to Aug 2024) |
 | WDTS traits and canopy water | `wdts/<aoi>_traits.nc`, `wdts/<aoi>_cwc.nc` | As before. `fetch_wdts_cwc.py` now also saves `nadir_dist`. `stanislaus` traits (Tahoe box, UTM 11) are warped onto the UTM 10 AOI grid with nearest neighbour; no canopy water there yet |
 | Geology | `env/<aoi>_geology.nc`; source in `geology/` | From `fetch_geology.py`: USGS State Geologic Map Compilation, California (1:750,000), grouped into granitic, volcanic, metamorphic, surficial and other on the 30 m grids |
-| Reflectance caches for emulated retrievals | `wdts/sim/<aoi>_refl<year>.nc`, `wdts/sim/<aoi>_refl_<yymmdd>_<product>.nc`, `wdts/sim/<aoi>_l8_<date>.nc` | From `proto_spaceborne_sim.py refl` (2013; 2018 for NEON and `sierra_nf`; 2013 for `stanislaus`), `proto_spaceborne_ts.py refl` (NEON and `sierra_nf`: 2013-05-03 and 2013-06-26 from ORNL DAAC 2391; 2018-06-22 and 2018-08-28 from ORNL DAAC 2154) and `fetch_landsat_c2_ee.py --scene` (2013-05-04, 05-20, 06-05, 06-21, 07-07; 2013-06-12 and 06-28 Tahoe; 2018-06-19, 08-22, 09-07) |
+| Reflectance caches for emulated retrievals | `wdts/sim/<aoi>_refl<year>.nc`, `wdts/sim/<aoi>_refl_<yymmdd>_<product>.nc`, `wdts/sim/<aoi>_l8_<date>.nc` | From `proto_spaceborne_sim.py refl` (2013; 2018 for NEON and `sierra_nf`; 2013 for `stanislaus`), `proto_spaceborne_ts.py refl` (NEON and `sierra_nf`: 2013-05-03 and 2013-06-26 from ORNL DAAC 2391; 2018-06-22 and 2018-08-28 from ORNL DAAC 2154) and `fetch_landsat_c2_ee.py --scene` (2013-05-04, 05-20, 06-05, 06-21, 07-07, 07-23 (no clear pixels), 08-08; 2013-05-27 (no clear pixels), 06-12 and 06-28 Tahoe; 2018-06-19, 07-05, 07-21, 08-06, 08-22, 09-07) |
+| NAIP-based tree mortality (SOAP/TEAK) | `stovall2019/ALLtrees_v2.csv`; `queally2025/{mortality,sites}.tif` | From `fetch_stovall2019.py`: Stovall et al. (2019), figshare 7609193 v4 (CC BY 4.0), about 1.8 M NEON-2013 lidar crowns with NAIP 2009–2016 crown mortality. From `fetch_queally2025.py`: the 30 m grid of Queally et al. (2025), Zenodo 13436293 (CC BY 4.0), with its NAIP flight-line mask. Both save `record.json` |
 | Airborne lidar structure | `lidar/<aoi>_lidar.nc`; raw in `lidar/aso/`, `lidar/lvis2008/` | From `fetch_lidar_structure.py`: ASO 2014–17 composite (Ferraz et al. 2020) and LVIS Sep 2008 footprints on the 30 m grids. Coverage and sources: `lidar_coverage.md` |
 
 ## Airborne imaging spectroscopy over the study boxes, 2018–2025 (`hls_results/airborne_coverage/`)
@@ -348,7 +350,7 @@ notes gave that all-pixel series as "forest".
     retrieval artifacts on red and grey canopy.
 - **Agreement with Landsat.** EWT resilience vs the same-years Landsat June
   NDMI metric is ρ 0.78 (NEON) and 0.79 (`sierra_nf`). EWT resilience vs
-  lidar mortality is ρ −0.47.
+  lidar mortality is ρ −0.51 (−0.47 before the gridding fix of §41).
 
 **Change features.** AVIRIS change (A: ΔEWT, ΔLMA, ΔN, Δchlorophyll,
 Δgreen-fraction QC) vs Landsat June change (L: ΔNDMI, ΔNIRv, ΔNDVI), for
@@ -358,7 +360,7 @@ notes gave that all-pixel series as "forest".
 |---|---|---|---|---|
 | NEON NDMI recovery | **+0.118 [0.075, 0.162]** | +0.321 | +0.015 | +0.007 [0.004, 0.009] |
 | NEON NDMI resilience | −0.018 (n.s.) | +0.164 | +0.039 | +0.013 [0.010, 0.017] |
-| NEON lidar mortality | −0.115 | +0.124 | +0.048 | +0.022 [−0.007, 0.043] |
+| NEON lidar mortality | −0.102 | +0.125 | +0.054 | +0.027 [0.006, 0.047] |
 | `sierra_nf` NDMI recovery | **+0.150 [0.130, 0.170]** | +0.207 | +0.015 | +0.010 [0.007, 0.013] |
 | `sierra_nf` NIRv recovery | **+0.076 [0.055, 0.097]** | +0.153 | +0.013 | +0.007 [0.004, 0.011] |
 | `sierra_nf` NDMI resilience | +0.019 (n.s.) | +0.123 | +0.023 | +0.007 [0.005, 0.010] |
@@ -368,12 +370,14 @@ notes gave that all-pixel series as "forest".
 - **The two are complementary.** L+A beats L by +0.10 to +0.32 everywhere.
 - **On top of Env+S and Landsat change,** AVIRIS change still adds a small
   gain (+0.006 to +0.014) whose CI excludes 0 for every Landsat target. For
-  the lidar mortality fraction it adds +0.017 to +0.022, with a CI touching
-  0 (about 7,000 lidar cells).
+  the lidar mortality fraction it adds +0.018 (2013→2014) to +0.027
+  (2013→2015) on 6,885 lidar cells. Both CIs exclude 0 under the default
+  folds but not under every fold assignment (§36). Before the gridding fix
+  of §41 it was +0.017 to +0.022, with a CI touching 0.
 - **Recovery failure** (bottom quintile of NDMI resilience), AUC at NEON:
   Env+S 0.912; +L 0.929; +L+A 0.932.
 - **Cross-track normalization** helps the Landsat targets (A vs raw A: +0.03
-  to +0.09) but hurts 2013→2015 lidar mortality (−0.054). Both versions are
+  to +0.09) but hurts 2013→2015 lidar mortality (−0.042). Both versions are
   reported.
 - **Caveat.** The Landsat targets share sensor noise with the Landsat change
   features, which favours L. The lidar target is the unbiased comparison.
@@ -666,6 +670,11 @@ explains it.
 - Their cycle-2 (2020–22) responses are not computed or examined.
 - `response_common.HELD_OUT` and `check_cycle2()` enforce this for the
   AOIs: `proto_response_transfer.build_cycle` refuses cycle 2 for them.
+- The two Yosemite-box sites have their own grids (§34):
+  - `yosemite_rest`: the June 12 2013 and June 22 2018 trait-mosaic
+    footprints, outside SEKI and outside the `neon_soap_teak` and
+    `sierra_nf` grids;
+  - `seki`: the same footprints inside the SEQU/KICA boundary.
 - The Tahoe-box work in §8–9 and the canopy water and dynamics in §14 use
   cycle 1 only.
 
@@ -2169,6 +2178,1150 @@ Bold, and every structural-carbon entry: the CI excludes 0.
 - **Caveats:** emulated retrievals; the Tahoe 2013 lines lack the 1323 and
   1333 nm bands; one acquisition per box.
 
+### 31. Do VSWIR dates add more to a Landsat series than as many extra Landsat dates? (`hls_results/spaceborne_ts/`, `hls_results/forward_pilot_landsat/`)
+
+In §28, a VSWIR time series added +0.009 to +0.045 for NDMI recovery on top
+of the matched Landsat series. That model also has twice as many dates as
+the Landsat series alone, so any extra dates might add as much. This section
+adds the same number of further Landsat dates instead (L′) and compares the
+two additions on the same cells and folds.
+
+**Data.** Further Landsat 8 path-42 scenes (`fetch_landsat_c2_ee.py
+--scene`), as many as the VSWIR dates:
+
+| | L (as in §28) | L′ (extra dates) |
+|---|---|---|
+| 2013, nearest set | May 4, Jun 5, Jun 21 | May 20, Jul 7, Aug 8 |
+| 2013, all-clear set | May 20, Jun 21, Jul 7 | May 4, Jun 5, Aug 8 |
+| 2018, NEON | Jun 19, Aug 22 | Jul 5, Sep 7 |
+
+- Jul 23 2013 has no clear pixels over either AOI after masking, so Aug 8
+  (NEON 98% clear, `sierra_nf` 81%) takes its place. That puts one L′ date
+  six weeks after the last VSWIR date (Jun 26); a later-season view favours
+  Landsat.
+- Jul 21 and Aug 6 2018 are 49–88% clear (Ferguson Fire smoke), so the 2018
+  L′ uses Jul 5 and Sep 7 (≥ 97%).
+- The two 2013 runs use the same six dates, split differently between L
+  and L′, on the same cells (NEON 28,664, `sierra_nf` 39,750; fewer than in
+  §28 because Aug 8 is only 81% clear at `sierra_nf`).
+
+**Method** (`proto_spaceborne_ts.py compare --landsat-extra`). L′ is built
+like L: each scene's bands, NDVI, NDMI, NBR and NIRv, plus its own last −
+first change. The emulated VSWIR blocks are those of §28. Over Env+S, no
+lidar, paired (1 km block bootstrap, 5 km as a check):
+- **L+V − L+L′** (balanced: the same number of dates added to the same L);
+- L+L′ − L and L+V − L (what each addition buys on its own);
+- L+V − L+l8multi (against the year's June and Jul–Sep composites);
+- L+L′+V − L+L′ (does VSWIR still add on top of the denser series?).
+
+**2013, NDMI recovery** (NEON Env+S 0.682, `sierra_nf` 0.520; bold where
+the 95% CI excludes 0):
+
+| ΔR², NEON / `sierra_nf` | nearest set as L | all-clear set as L |
+|---|---|---|
+| L+L′ − L | **+0.023** / **+0.011** | **+0.014** / **+0.010** |
+| L+V − L, native | **+0.046** / **+0.030** | **+0.034** / **+0.027** |
+| L+V − L, emit | **+0.035** / **+0.024** | **+0.024** / **+0.023** |
+| L+V − L, sbg_lo | **+0.043** / **+0.023** | **+0.030** / **+0.021** |
+| **L+V − L+L′, native** | **+0.023** / **+0.019** | **+0.021** / **+0.017** |
+| **L+V − L+L′, emit** | **+0.012** [0.005, 0.019] / **+0.013** [0.007, 0.018] | **+0.011** [0.005, 0.016] / **+0.013** [0.008, 0.018] |
+| **L+V − L+L′, sbg_lo** | **+0.020** / **+0.012** | **+0.017** / **+0.011** |
+| L+V − L+l8multi, emit / sbg_lo | **+0.023** / **+0.031** (NEON); **+0.015** / **+0.015** (`sierra_nf`) | **+0.016** / **+0.022**; **+0.014** / **+0.012** |
+| L+L′+V − L+L′, emit / sbg_lo | **+0.025** / **+0.030**; **+0.021** / **+0.020** | **+0.017** / **+0.022**; **+0.018** / **+0.016** |
+
+- With 5 km blocks every L+V − L+L′ entry keeps its sign. The NEON emit
+  entries widen to [0.000, 0.024] (nearest) and [0.001, 0.022] (all-clear);
+  every other entry still excludes 0.
+- **NIRv recovery**, L+V − L+L′: NEON nearest +0.007 for every
+  configuration (n.s.), all-clear **+0.011** to **+0.013**; `sierra_nf`
+  **+0.006** to **+0.008** with either set (emit and sbg_lo lower bounds at
+  0.000–0.001). L+L′+V − L+L′ is **+0.012** to **+0.019** everywhere.
+
+**2018, NEON** (cycle-2 responses; 22,628 pilot cells; Env+S 0.603):
+
+| ΔR² | NDMI recovery | NIRv recovery |
+|---|---|---|
+| L+L′ − L | **+0.016** | **+0.034** |
+| L+V − L, native / emit / sbg_lo | **+0.020** / +0.008 (n.s.) / +0.006 (n.s.) | **+0.023** / **+0.012** / **+0.015** |
+| **L+V − L+L′, native** | +0.004 [−0.008, 0.015] | **−0.011** |
+| **L+V − L+L′, emit** | **−0.008** [−0.016, −0.000] | **−0.022** |
+| **L+V − L+L′, sbg_lo** | **−0.010** [−0.022, −0.001] | **−0.019** |
+| L+V − L+l8multi, native / emit / sbg_lo | **+0.020** / **+0.008** / +0.006 (n.s.) | **+0.021** / **+0.010** / **+0.013** |
+| L+L′+V − L+L′, native / emit / sbg_lo | **+0.013** / **+0.009** / +0.006 [0.000, 0.013] | **+0.011** / +0.002 (n.s.) / **+0.005** |
+
+The 2018 composites add nothing to L (−0.000 / +0.002), while two more
+scenes add +0.016 / +0.034.
+
+**Fold-assignment sensitivity** (`--fold-seed`). The block bootstrap holds
+the CV folds fixed. Dropping 21 of §28's 22,649 cells for the extra dates
+moved the 2018 Env+S R² from 0.596 to 0.603 and emit L+V − L from +0.014 to
++0.008, because GroupKFold's size-balanced assignment of blocks to folds
+changes. So the key contrasts were rerun with blocks shuffled into folds
+under three seeds (NDMI recovery, NEON):
+
+| L+V − L+L′ | default folds | seed 1 | seed 2 | seed 3 |
+|---|---|---|---|---|
+| 2013 (nearest set), emit | **+0.012** | **+0.012** | **+0.015** | **+0.011** |
+| 2018, emit | **−0.008** | −0.003 | −0.006 | **−0.013** |
+| 2018, sbg_lo | **−0.010** | −0.005 | **−0.008** | **−0.016** |
+
+Fold assignment moves these contrasts by up to ±0.006, more than the
+bootstrap CIs suggest.
+
+**Cycle-2 analogue** (`proto_forward_pilot.py --landsat 20180619 --landsat
+<second scene> --landsat-composites`, the §29 cells): the 2018 traits (T18)
+against one more Landsat scene (L2: the second scene and the change) or the
+composites (LM), each added beyond Env+S+Leg+L1. Second scene Aug 22 (as in
+§29) or Jul 5 (the next clear path-42 date after Jun 19).
+
+| ΔR², NEON / `sierra_nf` | T18 − Aug 22 | T18 − Jul 5 | T18 − composites (Aug 22 cells) |
+|---|---|---|---|
+| NDMI resistance | **−0.014** / **−0.026** | −0.003 / +0.000 | +0.000 / −0.006 |
+| NDMI recovery | −0.004 / +0.005 (n.s.) | +0.010 [−0.001, 0.024] / −0.003 | −0.000 / **+0.011** |
+| NDMI resilience | +0.000 / **−0.007** | +0.000 / **−0.008** | +0.004 / −0.001 |
+| NIRv resistance | −0.005 / +0.002 (n.s.) | **+0.004** / +0.004 | **+0.005** / **+0.011** |
+| NIRv recovery | +0.002 / **+0.007** | **+0.007** / **−0.009** | **+0.010** / **+0.022** |
+| NIRv resilience | +0.002 / **+0.015** | +0.001 / +0.005 | **+0.008** / **+0.022** |
+
+The Aug 22 run reproduces §29 exactly (T18 beyond Env+S+Leg+L1, NDMI
+recovery: +0.000 / +0.009). The Jul 5 run, on 24,290 / 20,048 cells (20 / 31
+more than the Aug 22 run, which loses a few cloudy ones), gives **+0.014**
+[0.006, 0.024] / **+0.012** for the same contrast, with Env+S R² 0.569
+against 0.595 at NEON. That is the fold-assignment effect above. Rerunning the
+Aug 22 control on the §29 cells with blocks shuffled into folds
+(`proto_forward_pilot.py --fold-seed`, three seeds):
+
+| ΔR², NEON / `sierra_nf` | default folds (§29) | seed 1 | seed 2 | seed 3 |
+|---|---|---|---|---|
+| NDMI recovery, T18 beyond Env+S+Leg+L1 | +0.000 / **+0.009** | **+0.010** / **+0.016** | **+0.011** / **+0.008** | **+0.013** / **+0.008** |
+| NDMI recovery, T18 − Aug 22 | −0.004 / +0.005 | +0.005 / **+0.012** | +0.001 / +0.003 | +0.007 [0.000, 0.015] / +0.002 |
+| NIRv recovery, T18 beyond Env+S+Leg+L1 | **+0.015** / **+0.021** | **+0.013** / **+0.018** | **+0.017** / **+0.021** | **+0.015** / **+0.016** |
+| NDMI resistance, T18 − Aug 22 | **−0.014** / **−0.026** | **−0.023** / **−0.023** | **−0.017** / **−0.027** | **−0.017** / **−0.028** |
+
+§29's +0.000 at NEON is the outlier among four fold assignments.
+
+**Reading.**
+- **In the first drought, a VSWIR series adds more to a Landsat series than
+  as many extra Landsat dates do.** For NDMI recovery this holds at both
+  areas, with either split of the six Landsat dates, for every
+  configuration (emit +0.011 to +0.013, sbg_lo +0.011 to +0.020), and
+  under every fold assignment tried. The extra dates include a later-season
+  view that the VSWIR series lacks. For NIRv recovery the margin is smaller
+  (+0.006 to +0.013) and not significant at NEON with the nearest set.
+- **In 2018 it does not hold.** At NEON two more Landsat dates match or beat
+  the spaceborne-like VSWIR series (emit −0.003 to −0.013, sbg_lo −0.005 to
+  −0.016 across fold assignments; NIRv recovery −0.019 to −0.022). Native
+  AVIRIS ties. The 2018 caveats of §28 apply: weaker emulators on
+  uncorrected spectra, and Landsat inputs in the responses' baseline years.
+- **VSWIR is not redundant with a denser Landsat series:** on top of L+L′
+  it still adds +0.016 to +0.032 (2013) and up to +0.013 (2018) for NDMI
+  recovery.
+- **Cycle 2, one scene each:** a second Landsat scene matches the 2018
+  traits for every NDMI response (or beats them: NDMI resistance with Aug
+  22, resilience at `sierra_nf`). For the NIRv responses the result depends
+  on the second scene's date (the traits beat Aug 22 and trail Jul 5 for
+  NIRv recovery at `sierra_nf`); against the composites the traits add for
+  every NIRv response at both areas.
+- **§29's NEON headline is fold-sensitive:** T18 beyond Env+S+Leg+L1 for
+  NDMI recovery is +0.000 with §29's folds and +0.010 to +0.013 under three
+  shuffled fold assignments (+0.014 on the Jul 5 cells); `sierra_nf` +0.008
+  to +0.016. So beyond one June 2018 Landsat scene the 2018 traits add about
+  +0.01 for cycle-2 NDMI recovery at both areas, but no more than a second
+  scene does.
+- **Caveats:** emulated retrievals; the 2013 VSWIR dates span May–June
+  while L′ reaches August; the 2018 leg is one area; fold-assignment
+  variability of ±0.006 (and up to 0.014 for the cycle-2 contrast) on top
+  of the bootstrap CIs.
+
+### 32. Does a more flexible model close the gap or absorb the trait gain? (`hls_results/model_capacity/`)
+
+Every R² gain so far comes from one untuned gradient-boosting model
+(`response_common.hgb`: 300 iterations, learning rate 0.05). This section
+asks whether a more flexible learner gets the same skill from climate,
+terrain and structure alone, absorbs the trait gain, or makes the
+cross-drought transfer work.
+
+**Learners** (`response_common.make_model`):
+- **hgb**, the default model of every other section;
+- **hgb_tuned**, gradient boosting with leaves (15, 63), minimum leaf size
+  (20, 100) and the number of iterations (≤ 500 at learning rate 0.1) chosen
+  on an inner split holding out 20% of the training fold's 1 km blocks,
+  then refit on the whole training fold;
+- **mlp**, a multilayer perceptron (256-128-64, adam) on standardized,
+  median-imputed inputs with missing-value indicators and a standardized
+  target, early-stopped on the same kind of inner block split.
+
+Deep tabular models (TabPFN, FT-Transformer) are not tested: the `ecopro`
+env has no torch. So this tests model capacity on these inputs, not deep
+learning in general.
+
+**Method** (`proto_model_capacity.py`). Each feature set is fitted with every
+learner inside one ladder (`<set>|<learner>`), so every difference, within a
+learner or between learners, is paired on the same cells, 1 km folds and
+bootstrap draws (5 km as a check). Residual traits (Tres) are cross-fitted
+with hgb, as in the other sections, for every learner.
+- `within`: cycle 1 (§2), Env+S | Env+S+T | Env+S+Tres; with `--structure
+  aso`, Env+S | Env+S+L | Env+S+L+T | Env+S+L+Tres on the ASO cells (§5).
+  NDMI recovery and stress response.
+- `transfer`: environment-only models fitted on cycle 1 and applied to cycle
+  2 (§4, §21), pooled and within elevation quartiles.
+- `forward`: within cycle 2 (§11), Env+S | +Leg | +T18 | +Leg+T18.
+
+hgb reproduces the earlier numbers: +0.065 / +0.089 for Env+S+T (§2),
++0.038 / +0.025 for Tres over ASO (§5), +0.035 / +0.019 for T18 beyond Leg
+(§11).
+
+**Cycle 1, no lidar** (NEON 44,079 cells, `sierra_nf` 58,676; stress
+response 36,646 / 55,511). ΔR², bold where the 95% CI excludes 0:
+
+| NEON / `sierra_nf` | hgb | hgb_tuned | mlp |
+|---|---|---|---|
+| NDMI recovery, Env+S R² | 0.683 / 0.529 | 0.693 / 0.544 | 0.664 / 0.502 |
+| Env+S, − hgb | – | **+0.010** / **+0.016** | **−0.019** / **−0.027** |
+| +T | **+0.065** / **+0.089** | **+0.070** / **+0.091** | **+0.076** / **+0.110** |
+| +Tres | **+0.046** / **+0.070** | **+0.052** / **+0.072** | **+0.052** / **+0.076** |
+| Env+S+T\|hgb − Env+S of this learner | – | **+0.055** / **+0.073** | **+0.084** / **+0.115** |
+| Env+S+Tres\|hgb − Env+S of this learner | – | **+0.036** / **+0.054** | **+0.065** / **+0.097** |
+| Stress response, Env+S R² | 0.705 / 0.490 | 0.719 / 0.528 | 0.692 / 0.460 |
+| Env+S, − hgb | – | **+0.013** / **+0.038** | **−0.014** / **−0.030** |
+| +T | **+0.022** / **+0.055** | **+0.029** / **+0.068** | **+0.029** / **+0.091** |
+| +Tres | **+0.014** / **+0.042** | **+0.017** / **+0.052** | +0.005 / **+0.057** |
+| Env+S+T\|hgb − Env+S of this learner | – | **+0.009** / **+0.017** | **+0.036** / **+0.085** |
+| Env+S+Tres\|hgb − Env+S of this learner | – | +0.001 / +0.004 | **+0.028** / **+0.072** |
+
+**Cycle 1, over ASO lidar** (NEON 29,004 cells, `sierra_nf` 48,731; gains over
+Env+S+L):
+
+| NEON / `sierra_nf` | hgb | hgb_tuned | mlp |
+|---|---|---|---|
+| NDMI recovery, Env+S+L − hgb | – | **+0.012** / **+0.020** | **−0.031** / −0.007 |
+| +T | **+0.056** / **+0.037** | **+0.059** / **+0.038** | **+0.066** / **+0.043** |
+| +Tres | **+0.038** / **+0.025** | **+0.041** / **+0.027** | **+0.035** / **+0.012** |
+| Env+S+L+Tres\|hgb − Env+S+L of this learner | – | **+0.027** / +0.005 | **+0.070** / **+0.032** |
+| Stress response, Env+S+L − hgb | – | **+0.010** / **+0.040** | −0.003 / +0.001 |
+| +T | **+0.033** / **+0.035** | **+0.043** / **+0.043** | **+0.052** / **+0.045** |
+| +Tres | **+0.024** / **+0.021** | **+0.037** / **+0.031** | **+0.025** / +0.011 [−0.000, 0.022] |
+| Env+S+L+Tres\|hgb − Env+S+L of this learner | – | **+0.014** / **−0.019** | **+0.027** / **+0.020** |
+
+**Cross-drought transfer** (environment only, cycle 1 → cycle 2; NEON 24,342
+cells, `sierra_nf` 20,089; pooled R² and Spearman ρ):
+
+| NEON / `sierra_nf` | hgb | hgb_tuned | mlp |
+|---|---|---|---|
+| NDMI recovery R² | −0.42 / −2.68 | −0.45 / −3.06 | −4.70 / −13.9 |
+| NDMI recovery ρ | +0.22 / −0.07 | +0.24 / −0.08 | −0.34 / −0.38 |
+| NIRv recovery ρ | +0.41 / −0.22 | +0.44 / −0.26 | +0.41 / −0.38 |
+| NDMI resilience ρ | −0.39 / −0.36 | −0.33 / −0.37 | −0.29 / −0.55 |
+| NDMI recovery ρ within elevation quartiles | +0.15, −0.14, +0.26, +0.27 / +0.18, +0.17, +0.19, +0.29 | +0.16, −0.17, +0.25, +0.31 / +0.21, +0.19, +0.16, +0.28 | −0.01, −0.20, +0.16, +0.16 / −0.24, +0.18, −0.05, −0.01 |
+
+**Within cycle 2** (§11 cells). Leg and T18 gains are much the same under
+every learner:
+
+| NEON / `sierra_nf` | hgb | hgb_tuned | mlp |
+|---|---|---|---|
+| NDMI recovery, Env+S − hgb | – | +0.001 / −0.003 | **−0.056** / **−0.060** |
+| +Leg | **+0.063** / **+0.151** | **+0.066** / **+0.160** | **+0.084** / **+0.162** |
+| +T18 | **+0.065** / **+0.105** | **+0.064** / **+0.115** | **+0.082** / **+0.133** |
+| +T18 beyond Leg | **+0.035** / **+0.019** | **+0.029** / **+0.020** | **+0.031** / **+0.032** |
+| NIRv recovery, +T18 beyond Leg | **+0.032** / **+0.028** | **+0.039** / **+0.030** | **+0.033** / **+0.033** |
+| NDMI resilience, +T18 beyond Leg | **+0.018** / **+0.015** | **+0.030** / **+0.020** | **+0.037** / **+0.018** |
+
+Tuning changes cycle-2 Env+S by −0.003 to +0.007.
+
+**Reading.**
+- **For recovery the shortfall is missing information, not model
+  capacity.**
+  - Tuned boosting lifts Env+S by only +0.010 / +0.016 for NDMI recovery
+    (≤ 0.02), and by nothing in cycle 2.
+  - The MLP is worse than the default model everywhere.
+  - Every trait and residual-trait gain excludes 0 under every learner, at
+    both areas, without and with lidar. Traits on the default model still
+    beat the tuned learner without them (+0.055 / +0.073; residual traits
+    +0.036 / +0.054).
+  - No learner makes the environment-only transfer work: level fails, the
+    resilience ranking reverses, and the `sierra_nf` recovery ranking stays
+    near 0 pooled with the same within-elevation skill (§21).
+- **For stress response a better learner does help, at `sierra_nf`.**
+  Tuning adds +0.038 to Env+S (+0.040 over lidar), and there the residual
+  traits on the default model no longer beat the tuned learner without them
+  (+0.004 without lidar; −0.019 over lidar). Within the tuned learner the
+  trait gains are larger (+Tres +0.052 / +0.031 over lidar), so the gain
+  survives; stress-response gains should be quoted with the tuned learner.
+- **The MLP** gives the largest trait gains (+T), because it extracts least
+  from Env+S. Its residual-trait gains are weakest: n.s. for NEON stress
+  response and borderline over lidar at `sierra_nf`, but it is the weakest
+  learner on every response.
+- **Caveats:** a small tuning grid; one inner split per fold; Tres
+  residualized with hgb for every learner; no deep tabular models; two runs
+  ran concurrently, which affects timing, not results.
+
+### 33. Does the Tahoe-box structural-carbon direction survive a Landsat scene? (`hls_results/spaceborne_only/carbon_stanislaus/`)
+
+In the Yosemite box, residual lignin and cellulose go with worse recovery
+beyond the Landsat bands, in cycle 1 (§24) and cycle 2 (§29). The Tahoe
+box has the weakest drought signal of the three areas and shows only the
+structural-carbon half of the trait directions (§8–9, §22, §27, §30). This
+section asks whether that half also survives a Landsat scene there.
+Cycle 1 only.
+
+**Data.** The June 4 2013 Tahoe trait mosaic (non-`_v2`, cross-track
+normalized) and Landsat 8 path-43 scenes near it (`fetch_landsat_c2_ee.py
+--scene`):
+
+| Scene | Days from the flight | Clear share of the AOI |
+|---|---|---|
+| 2013-05-27 | −8 | 0% (no clear pixels) |
+| 2013-06-12 | +8 | 48% |
+| **2013-06-28** | +24 | **99%** |
+
+No path-42 scene covers the box on 2013-06-05. Jun 28 is the nearest
+usable scene. Jun 12 is a near-date check: cell means use only clear
+pixels, so about half of its cells carry no Landsat information.
+
+**Method** (`proto_spaceborne_only.py carbon --resid-landsat l8raw
+--resid-landsat l8multi --skip-ladder`).
+- Traits are residualized out of fold on three bases: Env+S; Env+S + the
+  scene's bands and indices (l8raw); and Env+S + the 2013 June and Jul–Sep
+  composites (l8multi).
+- The statistic is the within-stratum ρ (aridity × 200 m elevation) with
+  cycle-1 recovery, with 1 km block-bootstrap CIs.
+- 55,105 cells.
+- The run is repeated with blocks shuffled into folds (`--fold-seed` 1–3)
+  beside the default assignment.
+
+**NDMI recovery**, default folds (range over the four fold assignments in
+brackets; bold where every CI excludes 0):
+
+| Residual trait | on Env+S | + Jun 28 scene | + 2013 composites | + Jun 12 scene |
+|---|---|---|---|---|
+| **Lignin** | **−0.109** (−0.105 to −0.109) | **−0.090** (−0.086 to −0.090) | **−0.084** (−0.078 to −0.084) | **−0.108** |
+| **Cellulose** | **−0.116** (−0.116 to −0.119) | **−0.095** (−0.095 to −0.099) | **−0.092** (−0.092 to −0.095) | **−0.117** |
+| Fiber | **−0.081** | **−0.067** | **−0.063** | |
+| Nitrogen | +0.025 (+0.021 to +0.025; CI touches 0 under two) | +0.016 (n.s.) | +0.016 (n.s.) | +0.017 (n.s.) |
+| LMA | +0.023 (n.s.) | **+0.028** (+0.028 to +0.033; wrong sign, lower bounds +0.001 to +0.007) | **+0.033** (wrong sign) | +0.025 (n.s.) |
+
+- **The structural-carbon direction survives the Landsat bands in the
+  Tahoe box.** It survives under every fold assignment, with either Landsat
+  base. Beyond the scene the box keeps 83% of the lignin ρ and 82% of the
+  cellulose ρ.
+- In the Yosemite box, cycle 1 (§24, the same model, the Jun 21 scene
+  nine days after the flight), the fractions kept are:
+  - NEON: lignin −0.166 → −0.108 (65%), cellulose −0.154 → −0.125 (81%);
+  - `sierra_nf`: lignin −0.185 → −0.132 (71%), cellulose −0.163 → −0.122
+    (75%).
+
+  The Tahoe direction starts weaker but loses proportionally less.
+- The Jun 28 scene is 24 days after the flight, so it is a weaker control
+  than the nine-day Yosemite-box scenes. The two composites, which span June
+  to September, remove a little more (lignin −0.084, cellulose −0.092).
+- N keeps no direction. LMA has a weak wrong-sign one (+0.03), as in §30.
+- **NIRv recovery** is weaker throughout:
+  - lignin −0.046 on Env+S, −0.033 (−0.029 to −0.033, CIs exclude 0)
+    beyond the scene, and −0.016 (n.s. under every assignment) beyond the
+    composites;
+  - cellulose −0.062, −0.045 and −0.030 (−0.030 to −0.034), every CI
+    excluding 0.
+
+**Reading.** In cycle 1 the Tahoe box keeps the lignin and cellulose →
+slower NDMI recovery direction once a Landsat scene, or the season's
+composites, are in the residual base. It has the same sign as in the
+Yosemite box and holds under every fold assignment tried. A second-drought
+test of the direction beyond Landsat therefore has cycle-1 support on all
+three areas. For NIRv recovery, only cellulose keeps the direction beyond
+the composites.
+
+### 34. Held-out sites in the Yosemite box, and elevation strata fixed in advance (`config/heldout_aois.yml`, `config/heldout_strata.yml`)
+
+§10 holds out the Tahoe box, SEKI and the rest of the Yosemite box for the
+second drought. Only the Tahoe box (`stanislaus`) had a grid. This section
+defines the other two. It also fixes the elevation strata in which
+cross-drought rank skill will be reported on all three (§21). The strata
+are computed from elevation alone, before any of their 2020–22 responses
+exist.
+
+**Grids and masks** (`fetch_heldout_masks.py`, `config/heldout_aois.yml`).
+- Both sites lie on the 30 m UTM 11 lattice of the Yosemite-box trait
+  mosaics.
+- The footprint is `flight_id` > 0 in both the June 12 2013 (`_v2`) and
+  June 22 2018 mosaics, the dates of the 2013 and 2018 traits. The two
+  footprints cover 16,626 and 17,623 km²; their intersection is 16,489 km².
+- `yosemite_rest` is the whole mosaic extent (117 × 190 km). It keeps the
+  footprint outside SEKI and outside the `neon_soap_teak` and `sierra_nf`
+  grids: 14,915 km².
+- `seki` is a 15 × 31 km box. It keeps the footprint inside the NPS
+  SEQU/KICA boundary: 47 km², in western Kings Canyon around Grant Grove.
+  No other trait-mosaic box reaches the parks.
+- The grids live in their own config file, so scripts that loop over
+  every AOI of `hls_aois.yml` do not pick them up.
+- `aoi_env_layers.py --masks-only` builds NLCD 2013, terrain and the
+  per-year fire and harvest layers for them, but not climate or structure,
+  which a 117 × 190 km 30 m grid would not hold in memory. Their fire and
+  harvest polygons are in `fire/disturbance_heldout/`.
+- `yosemite_rest` is added to `response_common.HELD_OUT`.
+
+**Elevation strata** (`proto_heldout_strata.py`).
+- Cells: 90 m cells (≥ 70% valid) of NLCD 2013 forest with no fire or
+  harvest through 2025, inside the site mask.
+- Elevation quartile cutpoints are computed separately for each site. No
+  Landsat response or composite enters.
+
+| Site | Cells | Cutpoints (m) | Elevation range (m) |
+|---|---|---|---|
+| `stanislaus` (Tahoe box) | 52,456 | 1,733 / 1,976 / 2,178 | 931–2,749 |
+| `yosemite_rest` | 361,464 | 966 / 2,334 / 2,718 | 181–3,700 |
+| `seki` | 389 | 1,916 / 2,007 / 2,235 | 1,692–2,357 |
+
+For comparison, the pilot AOIs on the same definition: NEON 26,672 cells,
+1,178 / 1,904 / 2,306 m; `sierra_nf` 20,809 cells, 1,771 / 2,143 /
+2,389 m.
+
+- **SEKI is too small to test on its own.** Fire and harvest remove 55% of its
+  footprint forest pixels by 2019 and 90% by 2025 (47,538 → 4,764 pixels),
+  leaving 389 cells. The forward-pilot minimum is 5,000. SEKI can enter
+  only pooled with `yosemite_rest`, or through trait data from outside the
+  Yosemite box.
+- **`yosemite_rest` is large and spans more elevation than the pilots.**
+  It has 7.6× the cells of the two pilot AOIs together, and its lowest quartile (< 966 m) is
+  foothill forest and woodland below the mixed-conifer zone of the pilots.
+
+### 35. A second-drought test averaged over fixed fold splits, dry run on the pilot sites (`hls_results/forward_pilot_rule/`)
+
+§31 found that reassigning 1 km blocks to folds can move a single
+contrast by more than its bootstrap CI shows. A test fixed in advance for
+the held-out sites therefore should not rest on one fold assignment. This
+section implements such a test and runs it on the two pilot sites, on the
+§11 forward-pilot cells, exactly as the held-out sites will get it.
+
+**Rule** (`proto_forward_pilot.py --rule`; `response_common.FOLD_SEEDS`,
+`ladder_splits`, `bootstrap_r2_splits`;
+`proto_trait_directions.rho_within_splits`).
+- Each contrast is fitted under five fixed fold assignments: 1 km blocks
+  shuffled into five folds with seeds 11–15.
+- One set of 1 km block-bootstrap draws serves every assignment. Each draw
+  averages the paired ΔR² (or the within-stratum ρ) over the five, so the
+  CI is that of the average.
+- A contrast passes if the CI of the average excludes 0. Per-split values
+  and CIs are kept beside it.
+- With one assignment the code reproduces `bootstrap_r2` and
+  `rho_within_boot` exactly.
+- Learner: the tuned gradient boosting of §32, on both arms of every skill
+  contrast and in the transfer. Trait residuals use the default learner.
+
+The test has three parts. NDMI recovery is primary; NIRv recovery and NDMI
+resistance are reported beside it.
+- **Skill:** Env+S → +Leg (the cycle-1 legacy), and Env+S+Leg → +T18 (the
+  June 2018 traits, z-scored per date).
+- **Directions:** within-stratum ρ of 2018 N, LMA, lignin and cellulose
+  with cycle-2 recovery. They are reported as standardized, and
+  residualized on four bases: Env+S; Env+S+L1; Env+S+Leg; Env+S+Leg+L1.
+  L1 is the Jun 19 2018 Landsat 8 scene, three days before the flight.
+- **Transfer:** a cycle-1 model (Env+S, or Env+S+T13) applied to cycle 2
+  with T18 swapped in. Rank ρ is computed pooled and within elevation
+  quartiles. The quartile cutpoints come from elevation alone on the forest
+  cells undisturbed through 2025 (`proto_heldout_strata.py`, the §34
+  procedure), not from the response cells. The quartiles are therefore not
+  equal in size on the analysis cells (NEON 4,480–6,659 cells).
+
+**Skill** (NEON 24,301 cells / `sierra_nf` 20,055; average over the five
+splits, 95% CI, per-split range):
+
+| ΔR² | NDMI recovery | NIRv recovery | NDMI resistance |
+|---|---|---|---|
+| +Leg over Env+S, NEON | **+0.072** [0.057, 0.094] (0.065–0.078) | **+0.071** | **+0.097** |
+| +Leg over Env+S, `sierra_nf` | **+0.157** [0.135, 0.179] (0.150–0.163) | **+0.103** | **+0.086** |
+| **+T18 over Env+S+Leg, NEON** | **+0.032** [0.024, 0.041] (0.029–0.039) | **+0.034** [0.027, 0.042] | **+0.024** [0.018, 0.031] |
+| **+T18 over Env+S+Leg, `sierra_nf`** | **+0.021** [0.015, 0.028] (0.016–0.027) | **+0.029** [0.022, 0.037] | **+0.022** [0.015, 0.030] |
+
+Env+S R² for NDMI recovery is 0.593 (NEON) and 0.486 (`sierra_nf`). Every
+per-split CI excludes 0 as well; the lowest per-split lower bound is
++0.008. These gains match §11 under the default learner and folds (T18
+beyond Leg +0.035 / +0.019).
+
+**Directions**, NDMI recovery (average over the five splits; bold where
+the CI of the average excludes 0):
+
+| Residual ρ, NEON / `sierra_nf` | Nitrogen | LMA | Lignin | Cellulose |
+|---|---|---|---|---|
+| standardized, not residualized | **+0.30** / **+0.38** | **−0.31** / **−0.36** | **−0.23** / **−0.35** | **−0.12** / **−0.24** |
+| on Env+S | **+0.23** / **+0.23** | **−0.24** / **−0.23** | **−0.16** / **−0.23** | **−0.06** / **−0.16** |
+| on Env+S+L1 | **+0.12** / **+0.12** | **−0.12** / **−0.13** | **−0.09** / **−0.12** | **−0.05** / **−0.08** |
+| on Env+S+Leg | **+0.17** / **+0.15** | **−0.18** / **−0.15** | **−0.10** / **−0.14** | −0.02 [−0.05, 0.00] / **−0.08** |
+| on Env+S+Leg+L1 | **+0.10** / **+0.09** | **−0.11** / **−0.10** | **−0.07** [−0.09, −0.04] / **−0.09** | −0.02 [−0.05, 0.00] / **−0.06** [−0.08, −0.02] |
+
+- Per-split ranges are within ±0.01 of the average.
+- Every direction keeps its cycle-1 sign under every base at both sites,
+  and every CI excludes 0 except one case: **NEON cellulose once the
+  legacy is in the base** (−0.015 to −0.031 across splits; the CI
+  touches 0 under every split).
+- Lignin passes under all four bases at both sites (−0.066 [−0.093, −0.042]
+  and −0.089 [−0.112, −0.061] on the strictest).
+- NIRv recovery: every direction, cellulose included, passes under every
+  base at NEON (cellulose −0.041 on Env+S+Leg+L1).
+- A direction test that requires both lignin and cellulose beyond legacy
+  and Landsat would fail at NEON. One on lignin alone, or on Env+S+L1 (no
+  legacy), passes at both sites.
+
+**Transfer** (rank ρ with 1 km block-bootstrap CIs; the tuned learner):
+
+| Rank ρ, Env+S → Env+S+T | NEON, NDMI recovery | NEON, NIRv recovery | `sierra_nf`, NDMI recovery | `sierra_nf`, NIRv recovery |
+|---|---|---|---|---|
+| pooled | +0.26 → +0.27 | +0.34 → **+0.54** | +0.00 → **+0.12** | −0.22 → −0.16 |
+| elevation q1 | +0.25 → +0.31 | +0.10 → +0.27 | +0.16 → +0.15 | −0.10 → −0.13 |
+| q2 | −0.08 → −0.03 | −0.09 → +0.07 | +0.21 → +0.22 | −0.06 → −0.05 |
+| q3 | +0.24 → +0.34 | −0.09 → +0.06 | +0.24 → +0.37 | +0.00 → +0.08 |
+| q4 | +0.22 → +0.35 | −0.04 → +0.14 | +0.27 → **+0.51** | −0.12 → −0.05 |
+
+- At `sierra_nf` the §21 pattern reappears with the tuned learner and the
+  elevation-only cutpoints. NDMI recovery ranks at about 0 pooled and at
+  +0.16 to +0.27 within every quartile; the traits raise the upper two
+  quartiles to +0.37 and +0.51.
+- NIRv recovery does not transfer at `sierra_nf`, pooled or within
+  quartiles (as in §21).
+- At NEON the tuned learner transfers the environment better than the
+  default one (pooled NDMI recovery +0.26, against +0.20 in §11). Pooled,
+  the traits then add little for NDMI recovery (+0.27; §11: +0.20 → +0.33).
+  Within three of the four quartiles they still add +0.06 to +0.13.
+  NEON's second quartile ranks about 0 with or without traits.
+
+**Reading.** Under the averaged-over-splits rule, the pilot sites pass the
+skill part for every target: the 2018 traits add +0.021 to +0.034 beyond
+climate, structure and the first drought's legacy, and every split agrees.
+The directions keep their signs. Their size depends on the residual base:
+legacy or a Landsat scene each remove a quarter to
+two thirds of ρ on Env+S, and together more. Under the strictest base cellulose fails at NEON. The exact
+direction statistic therefore decides whether NEON would pass, and needs to
+be fixed before any held-out response is computed. Transfer rank skill
+within elevation strata reproduces §21 for NDMI recovery. It is a
+diagnostic (the transfer has no fitted cycle-2 baseline), not a pass/fail
+test.
+
+### 36. Which small contrasts survive reassigning blocks to folds? (`hls_results/fold_robustness/`)
+
+The block bootstrap holds the five CV folds fixed. §31 showed that
+shuffling 1 km blocks into folds differently can move a single contrast by
+up to ±0.006, and §29's NEON control by 0.013, more than its CI shows. This
+section reruns the earlier contrasts that sit within about 0.015 of 0. Each
+gets three shuffled fold assignments (`--fold-seed` 1–3) beside the
+default, on the same cells. A contrast is called **robust** if its CI
+excludes 0, with the same sign, under all four assignments.
+`collect_fold_seeds.py` writes one table per family to
+`hls_results/fold_robustness/` (default / seed 1 / 2 / 3, range, robust).
+The large gains, such as traits over Env+S and recovery residual gains
+over lidar, were not rerun.
+
+Runs, on NEON and `sierra_nf`, 90 m:
+- `proto_spaceborne_only.py compare --no-stack` and `carbon`, NDMI
+  recovery;
+- `proto_trait_dynamics.py --interval d1513`;
+- `proto_forward_pilot.py` (main ladder);
+- `proto_structure_from_spectra.py`;
+- `proto_response_traits.py --structure` (NDMI resistance, resilience and
+  stress response) and `--neighbour` (NDMI resistance, recovery,
+  resilience and stress response).
+
+Each was run with `--fold-seed` and `--tag _fold<s>_<aoi>`.
+
+**Results** (ΔR² range over the four assignments; bold where robust):
+
+| Contrast (section) | NEON | `sierra_nf` |
+|---|---|---|
+| VSWIR − Landsat scene, date for date, EMIT-like (§23) | **+0.009 to +0.012** | **+0.008 to +0.012** |
+| same, 30 m (sbg_lo) / native | **+0.019 to +0.021** / **+0.022 to +0.025** | **+0.020 to +0.024** / **+0.032 to +0.035** |
+| EMIT-like − two Landsat composites (§23) | −0.003 to −0.005 (tie) | −0.002 to −0.005 (tie) |
+| structural carbon beyond the Landsat scene, EMIT-like / 30 m (§24) | **+0.009 to +0.010** / **+0.013 to +0.015** | **+0.005 to +0.009** / **+0.008 to +0.012** |
+| same, beyond Landsat-emulated structural carbon (§24) | **+0.006** / **+0.009 to +0.011** | −0.002 to −0.004 / −0.001 to +0.002 (n.s.) |
+| AVIRIS change on top of Env+S + Landsat change, NDMI recovery (§3) | **+0.006 to +0.008** | **+0.009 to +0.011** |
+| same, NDMI resilience / NIRv recovery / NIRv resilience | **+0.010 to +0.013** / **+0.009 to +0.012** / **+0.006 to +0.008** | **+0.007 to +0.010** / **+0.007 to +0.009** / **+0.006 to +0.007** |
+| same, lidar mortality fraction | +0.015 to +0.031 (CI touches 0 under two; +0.021 to +0.030 before the gridding fix of §41) | – |
+| residual traits over lidar, NDMI resistance: 2013 trees / LVIS / ASO (§5) | +0.003 to +0.011 / **+0.013 to +0.017** / +0.005 to +0.010 (CI touches 0 under two) | ASO **+0.010 to +0.014** |
+| same, NDMI resilience | −0.004 to −0.010 / **+0.028 to +0.033** / **+0.015 to +0.018** | **+0.011 to +0.015** |
+| same, NDMI stress response | **+0.008 to +0.028** (CI touches 0 under three) / **+0.019 to +0.024** / **+0.016 to +0.024** | **+0.018 to +0.021** |
+| neighbour baseline B0: +Tres over Env+S+B0, resistance / recovery / resilience / stress response (§17) | **+0.010 to +0.012** / **+0.042 to +0.044** / **+0.036 to +0.040** / **+0.008 to +0.011** | **+0.030 to +0.035** / **+0.070 to +0.073** / **+0.041 to +0.044** / **+0.037 to +0.039** |
+| 2018 traits beyond legacy, cycle 2: NDMI recovery / resistance / resilience (§11) | **+0.025 to +0.035** / **+0.015 to +0.023** / **+0.014 to +0.025** | **+0.016 to +0.024** / **+0.013 to +0.020** / **+0.010 to +0.017** |
+| same, NIRv recovery / resistance / resilience | **+0.028 to +0.033** / **+0.014 to +0.021** / **+0.015 to +0.019** | **+0.026 to +0.030** / **+0.028 to +0.042** / **+0.038 to +0.041** |
+| skill kept without lidar, R²(Env+S+Ŝ+T) / R²(Env+S+L+T) (§15) | 0.94–1.01 (ASO 0.94–0.96, LVIS 0.95–1.01, 2013 trees 0.95–1.01) | ASO 0.92–0.96 |
+
+Notes on the table:
+- In the stress-response row the 2013-trees entry is not robust: the bold
+  marks only the LVIS and ASO entries.
+- Medians of the spread (max − min over the four assignments) per family:
+  - 0.002–0.003 for the head-to-head, structural-carbon and
+    trait-dynamics contrasts and the neighbour gains;
+  - 0.003–0.005 for the LVIS and ASO lidar checks;
+  - 0.006–0.008 for the cycle-2 gains, the no-lidar ladders and the
+    7,040-cell 2013-tree lidar check.
+
+  The largest spread among the quoted contrasts is 0.020: the stress
+  response over the 2013 trees.
+
+**Reading.**
+- **Robust:**
+  - the date-for-date VSWIR lead over a Landsat scene, at both areas and
+    for every configuration;
+  - the structural-carbon skill beyond the Landsat scene and composites;
+  - the AVIRIS-change add-on to Landsat change for every recovery and
+    resilience target;
+  - every neighbour-baseline gain;
+  - every cycle-2 gain of the 2018 traits beyond legacy;
+  - with LVIS and ASO, the residual-trait gains over lidar for resilience
+    and stress response, and for resistance except ASO at NEON;
+  - the no-lidar skill kept (0.92–1.01).
+- **Fold-sensitive:**
+  - NEON stress response over the 2013 lidar trees: +0.028 with the default
+    folds, +0.008 to +0.015 otherwise;
+  - NDMI resistance over ASO at NEON: +0.005 to +0.010;
+  - the trait-change gain for the lidar mortality fraction.
+
+  These were already the weakest entries of §5 and §3. The stress-response
+  and resistance gains over lidar rest on LVIS and on ASO at `sierra_nf`.
+- **Unchanged ties and nulls:** the EMIT-like vs two-composite tie, the
+  `sierra_nf` structural-carbon margin over Landsat-emulated carbon, and the
+  2013-tree resistance and resilience gains stay ties or nulls under every
+  assignment.
+
+### 37. A structural-carbon score under the averaged rule (`hls_results/forward_pilot_rule/`)
+
+In §35, lignin keeps its direction with cycle-2 recovery on every residual
+base at both pilot sites. Cellulose loses its CI at NEON once the
+cycle-1 legacy is in the base. A direction test on both traits would then
+depend on which trait is asked. This section adds one statistic for
+the pair: a structural-carbon score.
+
+**Score** (`proto_forward_pilot.py --rule --rule-directions-only`).
+- The mean of z-scored lignin and cellulose. On the residualized versions,
+  the z-scores are of the two residuals, separately for each base and fold
+  assignment. The expected sign is negative.
+- Its within-stratum ρ, the averaged-over-splits CI and the per-split rows
+  come from the same code and the same block draws as each trait in §35.
+- `--rule-directions-only` skips the skill and transfer parts. The
+  per-trait rows reproduce `rule_directions_*.csv` exactly (200 of 200
+  rows at each site).
+
+**Directions** (within-stratum ρ with cycle-2 recovery, average over the
+five splits, 95% CI):
+
+| Residual ρ of the score | NDMI recovery, NEON | NDMI recovery, `sierra_nf` | NIRv recovery, NEON | NIRv recovery, `sierra_nf` |
+|---|---|---|---|---|
+| standardized, not residualized | **−0.18** [−0.22, −0.14] | **−0.31** [−0.34, −0.27] | **−0.14** | **−0.09** |
+| on Env+S | **−0.12** [−0.15, −0.09] | **−0.21** [−0.23, −0.18] | **−0.11** | **−0.12** |
+| on Env+S+L1 | **−0.07** [−0.10, −0.05] | **−0.11** [−0.13, −0.07] | **−0.09** | **−0.08** |
+| on Env+S+Leg | **−0.07** [−0.09, −0.04] | **−0.12** [−0.14, −0.09] | **−0.08** | **−0.09** |
+| on Env+S+Leg+L1 | **−0.05** [−0.07, −0.02] | **−0.08** [−0.10, −0.05] | **−0.07** [−0.10, −0.05] | **−0.07** [−0.09, −0.04] |
+
+On the strictest base (Env+S+Leg+L1), NDMI recovery:
+
+| ρ (95% CI) | NEON | `sierra_nf` |
+|---|---|---|
+| lignin | −0.066 [−0.093, −0.042] | −0.089 [−0.112, −0.061] |
+| cellulose | −0.022 [−0.053, 0.003] | −0.055 [−0.081, −0.024] |
+| score | **−0.046** [−0.074, −0.019] | **−0.077** [−0.102, −0.047] |
+
+- **The score passes on every base at both sites, for both recovery
+  targets.** Every per-split CI excludes 0 as well. The weakest is NEON
+  NDMI recovery on the strictest base: per-split ρ −0.037 to −0.051, upper
+  bounds −0.009 to −0.024.
+- It sits between its two traits: weaker than lignin alone and stronger
+  than cellulose. At NEON the strictest-base margin from 0 (upper bound
+  −0.019) is smaller than lignin's (−0.042).
+
+**Reading.** As a single statistic for structural carbon, the score
+passes where cellulose alone fails, at NEON beyond legacy. It keeps both
+traits in the test. Lignin alone keeps the wider margin.
+
+### 38. Candidate definitions of the held-out remainder (`hls_results/heldout_variants/`)
+
+§34 left two questions about the Yosemite-box held-out sites.
+- `seki` is too small to test alone.
+- `yosemite_rest` reaches down into foothill woodland, below the mixed
+  conifer of the pilot sites.
+
+This section measures what pooling and restricting would do. It uses only
+elevation, forest type and the disturbance masks; no 2020–22 response of
+these areas is computed. The cutpoints in `config/heldout_strata.yml` are
+unchanged. The candidates are written to
+`hls_results/heldout_variants/strata_candidates.yml`.
+
+**Forest type.**
+- `fetch_forest_type.py` now also covers the two held-out grids (LANDFIRE
+  2014 EVT, the groups of §9).
+- `yosemite_rest` is 10% red fir, 8% mesic mixed conifer and 7% dry
+  pine/mixed conifer. Foothill pine woodland is 10%, chaparral 8% and oak
+  woodland 5%.
+- A cell counts as conifer if at least 50% of its valid pixels are in the
+  pine, mesic, red-fir or subalpine groups. Subalpine meadow is excluded.
+
+**Options** of `proto_heldout_strata.py`:
+- `--conifer`;
+- `--min-elevation` and `--max-elevation`;
+- `--pool` (add another area's cells);
+- `--key` (write under its own name).
+
+**Variants** (90 m cells of undisturbed NLCD forest, as in §34):
+
+| Variant | Cells | Cutpoints (m) | Elevation range (m) |
+|---|---|---|---|
+| `yosemite_rest` (as fixed in §34) | 361,464 | 966 / 2,334 / 2,718 | 181–3,700 |
+| + `seki` | 361,853 | 966 / 2,333 / 2,718 | 181–3,700 |
+| conifer | 234,713 | 2,244 / 2,591 / 2,813 | 346–3,597 |
+| conifer + `seki` | 235,057 | 2,242 / 2,591 / 2,813 | 346–3,597 |
+| floor 1,178 m (NEON's lowest cutpoint) | 252,675 | 2,271 / 2,590 / 2,810 | 1,178–3,700 |
+| conifer + floor 1,178 m | 225,302 | 2,308 / 2,610 / 2,822 | 1,178–3,597 |
+| conifer + ceiling 3,042 m (NEON's highest cell) | 223,346 | 2,211 / 2,566 / 2,783 | 346–3,042 |
+| conifer + floor + ceiling | 213,935 | 2,285 / 2,587 / 2,792 | 1,178–3,042 |
+| `seki`, conifer | 344 | 1,915 / 2,008 / 2,247 | 1,692–2,357 |
+
+The same conifer filter on the other areas (undisturbed forest cells):
+
+| Area | All | Conifer | Kept | Conifer cutpoints (m) |
+|---|---|---|---|---|
+| NEON | 26,672 | 18,856 | 71% | 1,766 / 2,163 / 2,425 |
+| `sierra_nf` | 20,809 | 18,777 | 90% | 1,832 / 2,173 / 2,403 |
+| `stanislaus` (Tahoe box) | 52,456 | 49,442 | 94% | 1,738 / 1,977 / 2,181 |
+
+- **Pooling `seki` changes nothing that matters.** It adds 389 cells (344
+  conifer) and moves no cutpoint by more than 2 m.
+- **Most of the foothill cells go with either restriction.** A conifer
+  filter and a floor at 1,178 m each remove about a third of
+  `yosemite_rest`. Each raises the lowest cutpoint from 966 m to about
+  2,250 m.
+- **The remainder is mostly higher than the pilot sites, even restricted.**
+  - The conifer `yosemite_rest` cells have a median of 2,591 m. The
+    conifer cells of NEON and `sierra_nf` have medians of 2,163 and
+    2,173 m.
+  - 65% (NEON) and 66% (`sierra_nf`) of the conifer remainder lie above
+    the pilot sites' upper conifer cutpoint (2,425 / 2,403 m). Only 5%
+    and 12% lie above their highest cell.
+  - So the remainder is mostly upper montane and subalpine forest (red fir
+    and lodgepole pine), where the pilots are mostly mixed conifer. A
+    ceiling at the pilots' highest cell trims only 11,367 cells.
+- **The filter would not touch the pilot sites equally.** It drops 29% of
+  NEON's cells but 10% of `sierra_nf`'s and 6% of the Tahoe box's. A
+  conifer-only definition of the held-out sites therefore needs the dry
+  run of §35 repeated on conifer pilot cells
+  (`proto_forward_pilot.py --rule --conifer-only`; below).
+
+**The §35 rule on conifer pilot cells** (`--rule --conifer-only`;
+elevation strata recomputed from the conifer cells; files
+`rule_*_conifer_<aoi>.csv`). NEON keeps 18,643 cells and `sierra_nf`
+18,317.
+
+| ΔR², average over five splits (95% CI) | All cells | Conifer cells |
+|---|---|---|
+| +Leg over Env+S, NEON, NDMI recovery | +0.072 | +0.061 [0.048, 0.076] |
+| **+T18 over Env+S+Leg, NEON**: NDMI recovery / NIRv recovery / NDMI resistance | +0.032 / +0.034 / +0.024 | **+0.037** [0.024, 0.055] / **+0.034** / **+0.040** |
+| +Leg over Env+S, `sierra_nf`, NDMI recovery | +0.157 | +0.149 [0.128, 0.172] |
+| **+T18 over Env+S+Leg, `sierra_nf`**: NDMI recovery / NIRv recovery / NDMI resistance | +0.021 / +0.029 / +0.022 | **+0.026** [0.019, 0.034] / **+0.031** / **+0.020** |
+
+| Residual ρ on Env+S+Leg+L1, NDMI recovery | All cells, NEON / `sierra_nf` | Conifer cells, NEON / `sierra_nf` |
+|---|---|---|
+| nitrogen | **+0.10** / **+0.09** | **+0.10** / **+0.09** |
+| LMA | **−0.11** / **−0.10** | **−0.11** / **−0.09** |
+| lignin | **−0.07** / **−0.09** | **−0.09** / **−0.09** |
+| cellulose | −0.02 [−0.05, 0.00] / **−0.06** | **−0.05** [−0.08, −0.02] / **−0.06** |
+| score (§37) | **−0.05** / **−0.08** | **−0.07** / **−0.08** |
+
+- **On conifer cells every direction passes on every base at both
+  sites**, for NDMI and NIRv recovery. That includes NEON cellulose beyond
+  legacy, which fails on all cells. The cells that the filter removes at
+  NEON (oak and foothill pine woodland, chaparral and riparian, 29%) are
+  where cellulose loses its direction.
+- The skill part passes as before. The 2018 traits add +0.020 to +0.040
+  beyond legacy, every split agreeing, as much as on all cells or more.
+- **Transfer** (rank ρ of NDMI recovery, Env+S → Env+S+T):
+  - NEON pooled goes from +0.26 → +0.27 on all cells to −0.09 → +0.09 on
+    conifer cells.
+  - Within the conifer quartiles NEON gives −0.05 → +0.04, +0.16 → +0.34,
+    +0.27 → +0.43 and +0.38 → +0.52.
+  - `sierra_nf` pooled goes from +0.00 → +0.12 to −0.11 → +0.05.
+  - Within its quartiles `sierra_nf` gives +0.25 → +0.13, +0.16 → +0.22,
+    +0.20 → +0.37 and +0.30 → +0.46.
+  - As in §21 and §35, the transfer ranks within elevation bands better
+    than pooled. On conifer cells the traits raise every quartile except
+    the lowest.
+
+**Computation.** Independent fits (fold assignments × feature sets in
+`ladder_splits`, and the trait residuals of `--rule`) now run in worker
+processes, `response_common.pmap`, when `ECOPRO_JOBS` > 1. Each worker
+uses one OpenMP thread. On tables of this size a gradient-boosting fit is
+faster on one thread than on ten, and gives the same predictions.
+Parallel and serial runs give identical ladders, predictions and
+residuals; the first NEON conifer contrasts match a serial run digit for
+digit. A full `--rule` run on one site takes about 15 minutes with eight
+workers, against 3–3.5 hours before.
+
+**Reading.**
+- Restricting the held-out remainder to conifer removes its foothill
+  woodland and costs the pilot test nothing.
+- On conifer cells the pilots pass every part of the rule. That includes
+  both structural-carbon traits beyond legacy and the Landsat scene.
+- What a restriction does not change is that the remainder sits higher
+  than the pilots: two thirds above their upper conifer quartile.
+
+### 39. The held-out test cells, fixed (`config/heldout_aois.yml`, `config/heldout_strata.yml`)
+
+The held-out sites are tested on their **conifer cells**, the variant of
+§38. This section fixes that definition in the configuration and the code,
+before any 2020–22 response of these sites exists. Nothing here computes a
+response.
+
+**Definition** (`test_cells` in `config/heldout_aois.yml`).
+- 90 m cells (≥ 70% valid) of NLCD 2013 forest with no fire or harvest
+  through 2025, inside the site mask, as in §34.
+- At least 50% of the cell's valid pixels in the pine, mesic, red-fir or
+  subalpine groups of LANDFIRE 2014 EVT (`fetch_forest_type.py`), meadows
+  excluded.
+- `proto_heldout_strata.py` reads the groups and the threshold from the
+  configuration. `--conifer`, `proto_forward_pilot.py --conifer-only` and
+  the cycle-2 builder all use the same cells
+  (`proto_heldout_strata.test_cells`).
+
+**Sites and elevation strata** (`config/heldout_strata.yml`, recomputed
+from the conifer cells; they match §38):
+
+| Site | Cells | Cutpoints (m) | Elevation range (m) |
+|---|---|---|---|
+| `stanislaus` (Tahoe box) | 49,442 | 1,738 / 1,977 / 2,181 | 937–2,749 |
+| `yosemite_rest` | 234,713 | 2,244 / 2,591 / 2,813 | 346–3,597 |
+
+- **`seki` is not tested.** It keeps 389 cells (§34), and pooling it with
+  `yosemite_rest` moves no cutpoint by more than 2 m (§38). It stays in
+  `response_common.HELD_OUT`, and `response_common.NOT_TESTED` makes the
+  cycle-2 builder refuse it even when held-out sites are allowed. Its
+  2020–22 responses are never computed. Its all-cell cutpoints stay in the
+  strata file for reference.
+- **The cycle-2 builder keeps only the test cells.** With
+  `allow_held_out`, `proto_response_transfer.build_cycle` restricts a
+  held-out site's 2020–22 table to `test_cells`. A held-out cycle-2 table
+  therefore cannot contain any other cell. Cycle 1, which the Tahoe-box
+  work uses, is unchanged.
+- The pilot sites keep the same conifer cells as in §38 (NEON 18,684 before
+  the Landsat-scene filter, 18,643 after).
+
+### 40. Does the structural-carbon direction hold in the pilots' high country? (`hls_results/forward_pilot_rule/rule_directions_upper.csv`)
+
+Two thirds of the conifer `yosemite_rest` cells lie above the pilot sites'
+upper conifer quartile (§38): red fir and lodgepole pine, where the pilots
+are mostly mixed conifer. This section asks, on the pilot sites only,
+whether the directions of the §35 rule hold there.
+
+**Design** (`proto_forward_pilot.py --rule --rule-directions-only
+--conifer-only --rule-subset upper --rule-subset highfir --rule-pool`).
+- The trait residuals are fitted exactly as in §38, on all conifer cells
+  of each pilot, under the five fixed fold assignments. Only the cells on
+  which the within-stratum ρ is computed change:
+  - `upper`: the site's upper conifer elevation quartile (≥ 2,425 m at
+    NEON, 4,585 cells; ≥ 2,403 m at `sierra_nf`, 4,570);
+  - `highfir`: cells ≥ 50% red-fir or subalpine EVT (8,436 and 11,032).
+- Pooled: both pilots together, strata and 1 km blocks kept apart by site,
+  blocks resampled jointly.
+- The `all` rows reproduce §38 to the last digit (score on Env+S+Leg+L1,
+  NDMI recovery: NEON −0.0743, `sierra_nf` −0.0835).
+- In `upper`, strata with fewer than 100 cells drop out: 7 strata (3,797
+  cells) remain at NEON and 5 (4,299) at `sierra_nf`.
+
+**Structural-carbon score, residual on Env+S+Leg+L1** (average over five
+splits, 95% CI; range over the splits):
+
+| Cells | NDMI recovery | NIRv recovery |
+|---|---|---|
+| NEON, all conifer | −0.074 [−0.102, −0.046] | −0.101 [−0.131, −0.071] |
+| NEON, `upper` | **−0.103** [−0.156, −0.045] (−0.112 to −0.093) | **−0.131** [−0.180, −0.079] |
+| NEON, `highfir` | **−0.106** [−0.143, −0.068] | **−0.139** [−0.173, −0.105] |
+| `sierra_nf`, all conifer | −0.084 [−0.116, −0.051] | −0.070 [−0.101, −0.039] |
+| `sierra_nf`, `upper` | −0.067 [−0.142, 0.000] (−0.079 to −0.055) | −0.028 [−0.095, 0.039] |
+| `sierra_nf`, `highfir` | **−0.071** [−0.109, −0.032] | **−0.058** [−0.097, −0.019] |
+| **Pooled, `upper`** | **−0.084** [−0.127, −0.040] (−0.090 to −0.076) | **−0.076** [−0.121, −0.034] |
+| **Pooled, `highfir`** | **−0.086** [−0.112, −0.058] | **−0.092** [−0.119, −0.062] |
+
+The per-trait ρ on the same base, pooled (`upper` / `highfir`), NDMI
+recovery:
+- lignin −0.109 [−0.152, −0.066] / −0.102 [−0.130, −0.073];
+- cellulose −0.044 [−0.084, −0.001] / −0.056 [−0.083, −0.030];
+- nitrogen +0.130 / +0.123 and LMA −0.148 / −0.132, every CI excluding 0.
+
+- **The score keeps its negative sign in every subset, at both sites, for
+  both responses, and under every split.** Pooled, its CI excludes 0 in
+  both subsets for NDMI and NIRv recovery. At NEON it is stronger above
+  the upper quartile than on all conifer cells.
+- **`sierra_nf` alone is weaker high up.** Its NDMI score in `upper` has
+  the expected sign but a CI reaching 0 (+0.0004); NIRv is −0.028 (n.s.).
+  Cellulose carries most of the weakening: it has no direction in
+  `sierra_nf` `upper` (NDMI −0.045, n.s.; NIRv +0.008), and is n.s. in NEON
+  `upper` (−0.042). Lignin keeps its CI below 0 in every subset except
+  `sierra_nf` `upper` for NIRv (−0.060 [−0.122, 0.004]).
+- In the red-fir/subalpine subset every score CI excludes 0 at each site
+  separately.
+- Leaf economics holds too: N and LMA keep their directions in every
+  subset, with larger ρ high up at NEON (N +0.19, LMA −0.22 in `upper`).
+
+**Reading.** On the pilot sites the structural-carbon direction holds in
+upper-montane and subalpine conifer, the stands that make up most of the
+held-out remainder, when both pilots are pooled and by forest type at each
+site. The margin is thinner than on all conifer cells at `sierra_nf`, and
+it rests on lignin more than on cellulose there. The held-out test cells
+(§39) are unchanged.
+
+### 41. Does a second, NAIP-based mortality product agree with the lidar trees? (`hls_results/stovall_check/`)
+
+Every mortality result so far uses one product: the NEON lidar-tree cohort
+of Hemming-Schroeder et al. (2023, "HS"), trees live in 2013 and dead in
+both 2017 and 2018. It is a greenness classifier trained on labels from the
+same two sites, and nothing independent had checked it. Stovall, Shugart &
+Yang (2019) segmented crowns from the same NEON 2013 lidar canopy height
+model and classified each crown in NAIP 2009–2016. This section compares
+the two products tree by tree and cell by cell, then reruns the mortality
+models with each as the target.
+
+**Data and design** (`fetch_stovall2019.py`, `fetch_queally2025.py`,
+`proto_stovall_check.py`).
+- **Stovall trees.** `ALLtrees_v2.csv` (figshare 7609193 v4, md5 checked)
+  holds 1,808,334 trees: 309,034 at SOAP and 1,499,300 at TEAK, split at
+  x = 310,000 as HS did. 85% fall inside the AOI grid. `dead` equals
+  `mort_year` ≠ "Live" for every tree. Of the trees first dead in 2016,
+  99.7% have more than 37.5% of the crown dead that year.
+- **Cohort.** Trees alive through 2012 (`mort_year` not 2009, 2010 or
+  2012): 1,680,113. Died means first dead in 2014 or 2016 (36%). Stovall
+  ends in 2016, so trees that died in 2017 count only in HS.
+- **CRS.** For trees ≥ 30 m, the median offset from a Stovall point to the
+  nearest HS 2013 treetop is ≤ 0.15 m in x and y at both sites. The points
+  are read as EPSG:32611, with no shift.
+- **Gridding.** Per-pixel counts on the AOI's 30 m grid and cell means at
+  90 and 270 m over undisturbed forest, with ≥ 5 cohort trees per cell, as
+  for the HS cohort. Our 30 m mean 2016 crown dead fraction (all trees)
+  reproduces the published grid of Queally et al. (2025): ρ 0.994, R² 0.99
+  on 105,520 pixels.
+- **Flight-line mask.**
+  - Queally et al. masked the areas that one NAIP 2016 date imaged at a
+    high sensor zenith angle, with heavy shading. Their 30 m grid (Zenodo
+    13436293, on our lattice) is empty there.
+  - `fetch_queally2025.py` reads four small members from the 3.1 GB archive
+    by HTTP range requests.
+  - The mask is the set of pixels where both products have trees but the
+    grid is empty, in areas ≥ 1 ha: 44,975 pixels (4,048 ha), 94% of them
+    at TEAK.
+  - 97% of the candidate pixels have an HS 2017 value, so the gaps are
+    their mask, not gaps in HS.
+- **Queally et al.'s reconciliation.** The mask is how they reconciled
+  the two products: they traced "the areas of highest divergence" to the
+  oblique NAIP lines and, with those masked, found that both products
+  "consistently capture broad-scale mortality trends" along each
+  predictor. They kept a caveat about HS's lower 2017 mortality at TEAK.
+  On their own masked grid, TEAK still gives ρ 0.40 at 90 m, with Stovall
+  +0.15 higher (below).
+- **Tree matching** follows HS's own script
+  (`hemming_schroeder2023/hpc/sierra/align_trees/tree_match_02_matching.R`):
+  each Stovall tree goes to the nearest HS 2017 treetop, and counts as
+  matched if it lies inside that tree's 2013 crown.
+  - This reproduces HS's published confusion matrix (their Table 3) to
+    within 0.03%: 714,491 matched trees (theirs 714,656); 151,394 dead in
+    both (151,393); 368,579 live in both (368,576).
+  - The paper's text and the script's readme describe other rules (a
+    search from each HS tree; any containing crown, ties broken by
+    height), but the published numbers come from the script.
+
+**A fix in the lidar-tree cohort.**
+- `proto_trait_dynamics.lidar_cohort` gave pixels without cohort trees 0
+  deaths but no trees (NaN).
+- In cells that had such pixels, the fraction was therefore divided over
+  too few pixels:
+  - it was biased low (mean 0.247 instead of 0.264 over 7,059 cells at
+    90 m; r = 0.92 between the two);
+  - `mort_n` was too high, so 174 of those cells really have fewer than 5
+    trees.
+- This is now fixed, and the trait-dynamics table has been rebuilt with
+  the corrected fraction (old outputs in
+  `trait_dynamics/pre_cohort_fix/`). §3 and §36 quote the rebuilt numbers.
+- The earlier mortality results of §2 and §5 still use the old fraction.
+  The "HS, corrected" rerun below shows that the effect on them is small.
+- The trait-dynamics rows that do not involve mortality are unchanged to
+  the last digit.
+
+**Tree level.** On matched cohort trees: Stovall died by 2016 vs HS died
+in 2017–18.
+
+| Site | Trees | Stovall died | HS died | Agreement | κ |
+|---|---|---|---|---|---|
+| SOAP | 143,322 | 0.42 | 0.51 | 0.84 | **0.68** |
+| TEAK | 300,380 | 0.34 | 0.23 | 0.72 | 0.33 |
+| TEAK, outside the mask | 165,795 | 0.46 | 0.21 | 0.65 | 0.25 |
+
+- **By height** (5–15 / 15–30 / > 30 m, outside the mask): κ at SOAP is
+  0.55 / 0.69 / 0.61; at TEAK it is 0.14 / 0.19 / 0.30.
+- **Inside the masked area at TEAK**, Stovall finds less mortality than HS
+  (0.19 vs 0.25). Outside it, Stovall finds more than twice as much.
+- **Matching.**
+  - 40% of Stovall cohort trees match (58% at SOAP, 36% at TEAK). So do 69%
+    of the HS cohort trees in the area Stovall covers.
+  - Stovall splits crowns more finely: 43,830 HS trees took more than one
+    Stovall tree.
+- **Matched vs unmatched.** At SOAP, matched Stovall trees died more often
+  than unmatched ones: 0.41 vs 0.29 overall, and still in each height class
+  (> 30 m: 0.62 vs 0.49). At TEAK the order reverses (0.33 vs 0.39). HS
+  trees differ less (SOAP 0.53 vs 0.42; TEAK 0.23 vs 0.21).
+
+**Cell level** (cohort died fractions; 1 km block-bootstrap CIs;
+`agreement.csv`):
+
+| Cells | Site | n | ρ | r² | Stovall − HS |
+|---|---|---|---|---|---|
+| 90 m, outside the mask | SOAP | 1,099 | **0.84** [0.78, 0.88] | 0.72 [0.65, 0.77] | −0.101 [−0.123, −0.073] |
+| 90 m, outside the mask | TEAK | 2,943 | 0.37 [0.30, 0.44] | 0.14 [0.10, 0.19] | **+0.279** [+0.256, +0.299] |
+| 90 m, outside the mask | both | 4,042 | 0.25 [0.19, 0.31] | 0.07 [0.05, 0.11] | +0.175 [+0.132, +0.219] |
+| 90 m, all | SOAP | 1,297 | 0.77 [0.65, 0.85] | 0.60 [0.46, 0.72] | −0.098 [−0.122, −0.066] |
+| 90 m, all | TEAK | 5,511 | 0.15 [0.08, 0.23] | 0.03 [0.01, 0.06] | +0.127 [+0.089, +0.164] |
+| 30 m, outside the mask | SOAP / TEAK | 8,385 / 18,162 | 0.79 / 0.33 | 0.64 / 0.11 | −0.101 / +0.298 |
+| 270 m, outside the mask | SOAP / TEAK | 122 / 302 | 0.81 / 0.44 | 0.67 / 0.20 | −0.095 / +0.287 |
+
+- **On the 1:1 line**, Stovall explains HS with R² +0.36 at SOAP (90 m,
+  outside the mask) and negative R² at TEAK at every scale.
+- **Queally's continuous form** (mean 2016 crown dead fraction of all
+  trees) against the HS cohort fraction, 90 m outside the mask: ρ 0.77 at
+  SOAP and 0.37 at TEAK.
+- **Queally's own grid**, aggregated to 90 m: ρ 0.74 (SOAP) and 0.40
+  (TEAK); Stovall − HS at TEAK is +0.15.
+
+**Mortality reruns** (`stovall_check/models/<target>_<cells>/`;
+`proto_response_traits.py --mortality-source --mortality-cells`).
+- The design is as in §2 and §5, at 90 m, weighted by tree count.
+- "Common" cells are those outside the mask with both cohorts. On these
+  the NEON 2013 structure block exists for every cell, so the NEON 2013
+  check uses the same 4,028 cells for both targets.
+
+| Target (cells) | +T over Env+S | L over Env+S, NEON 2013 | +L+T, NEON 2013 | +L+Tres, NEON 2013 | +L+Tres, ASO | +L+Tres, LVIS |
+|---|---|---|---|---|---|---|
+| HS as recorded, old gridding (7,040) | +0.083 [0.061, 0.107] | +0.148 | +0.025 [0.013, 0.038] | +0.003 (n.s.) | +0.021 [0.001, 0.041] | −0.006 (n.s.) |
+| HS, corrected (6,866) | +0.079 [0.051, 0.106] | +0.127 | +0.021 [0.008, 0.034] | −0.002 (n.s.) | +0.020 [0.002, 0.039] | −0.002 (n.s.) |
+| HS, common (4,028) | +0.092 [0.059, 0.129] | +0.140 | +0.020 [0.009, 0.031] | +0.009 (n.s.) | +0.020 (n.s.) | −0.019 (n.s.) |
+| **Stovall, common (4,028)** | **+0.072** [0.045, 0.102] | +0.123 | +0.017 [0.000, 0.035] | −0.001 (n.s.) | +0.028 [0.005, 0.058] | −0.011 (n.s.) |
+| Stovall, outside the mask (6,858) | +0.067 [0.045, 0.092] | +0.123 | +0.017 [0.000, 0.035] | −0.001 (n.s.) | +0.023 [0.006, 0.039] | +0.030 [0.007, 0.053] |
+
+- **Cells.** ASO and LVIS cells are, in row order: 5,427 / 3,724;
+  5,294 / 3,619; 2,845 / 1,893 for both common rows; 5,279 / 3,054.
+- **The default `dynamics` path is a no-op.** The "HS as recorded" row was
+  rerun through it, before the trait-dynamics table was rebuilt, and
+  reproduces §2 and §5 to the last digit. With the rebuilt table, the
+  default target is the "HS, corrected" one.
+- **Fold assignments** (default plus `--fold-seed` 1–3, common cells;
+  `fold_robustness/mortality_*.csv`): range of the point estimates, and
+  whether every CI excludes 0.
+
+| Contrast | HS, common | Stovall, common |
+|---|---|---|
+| +T over Env+S | +0.084 to +0.106 (robust) | +0.040 to +0.072 (not robust) |
+| +L+T over Env+S+L, NEON 2013 | +0.015 to +0.032 (robust) | +0.012 to +0.023 (not robust) |
+| +L+Tres over Env+S+L, NEON 2013 | +0.007 to +0.022 | −0.001 to +0.014 |
+| +L+Tres over Env+S+L, ASO | +0.002 to +0.033 | +0.015 to +0.030 |
+| +L+Tres over Env+S+L, LVIS | −0.019 to +0.027 | −0.012 to +0.013 |
+
+**Leakage check** (`proto_lidar_validation.py`, common cells;
+`models/<target>_common/validation/`): what each lidar source adds beyond
+Env+S plus the NEON 2013 structure.
+
+| Target | ASO (2,845 cells) | LVIS 2008 (1,893 cells) |
+|---|---|---|
+| HS | +0.026 [−0.000, 0.053] | +0.017 [−0.001, 0.031] |
+| Stovall | +0.012 [−0.005, 0.028] | +0.048 [0.016, 0.083] |
+
+- ASO does not detectably record either product's die-off.
+- That the pre-drought LVIS adds to the Stovall target is not explained.
+
+**Reading.**
+- **The two products agree at SOAP and not at TEAK.**
+  - At SOAP, Stovall ranks 90 m cells like HS (ρ 0.84, r² 0.72), and agrees
+    on trees with κ 0.68. It reads about 0.10 lower throughout, as expected
+    when only HS counts the trees that died in 2017.
+  - At TEAK, ρ is 0.37 (κ 0.25 on trees outside the mask). Stovall's
+    mortality by 2016 is more than double HS's by 2017–18. Timing cannot
+    produce that, since Stovall ends a year earlier, and the flight-line
+    mask makes it larger, not smaller.
+  - One of the two products is wrong at TEAK, and this check cannot say
+    which. HS discuss an underestimate of their own at TEAK.
+- **Pooled over both sites the products barely agree** (ρ 0.25), because
+  their level differences have opposite signs at the two sites.
+- **The mortality results hold under both targets.**
+  - Traits add +0.07 to +0.09 over Env+S under every target. The Stovall
+    gain is smaller and fold-sensitive (+0.040 to +0.072).
+  - Lidar structure takes almost all of it. On the common cells, residual
+    traits beyond Env+S+L stay between −0.019 and +0.033 under both
+    targets, every lidar source and every fold assignment. None of these
+    gains has its CI above 0 under every assignment.
+  - On Stovall's own cells, ASO and LVIS leave +0.023 and +0.030 with CIs
+    above 0 (default assignment only). This is the size of the
+    lidar-tree cohort's ASO residual in §5 (+0.021).
+- **Correcting the lidar-tree cohort's gridding changes nothing material**
+  (+T +0.079 vs +0.083; residuals within ±0.005).
+
+### 42. Does the SOAP–TEAK mortality contrast depend on the mortality product? (`hls_results/stovall_check/models/by_site/`)
+
+§2 found a much larger mortality trait gain at SOAP than at TEAK (+0.19
+vs +0.04). §41 found that the two mortality products agree at SOAP and
+not at TEAK, so the small TEAK gain could come from the target rather
+than the trees. The §41 reruns skipped the conditional splits
+(`--gains-only`). This section reruns them for each target.
+
+**Design.**
+- The same `proto_response_traits.py` runs as §41, at 90 m, weighted by
+  tree count, without `--gains-only`. The targets and cells are those of
+  §41's table.
+- The site split is the script's: the western and eastern halves of the
+  AOI grid. It differs from §41's x = 310,000 split in 292 cells, none of
+  which has a value under either product, so for mortality the two splits
+  are the same.
+- A rerun through the pre-fix trait-dynamics table
+  (`trait_dynamics/pre_cohort_fix/`) reproduces §2's conditional rows to
+  the last digit.
+
+| Target (cells) | Site | n | Env+S R² | +T over Env+S |
+|---|---|---|---|---|
+| HS as recorded, old gridding (7,040; §2) | SOAP | 1,410 | 0.33 | **+0.192** [0.128, 0.266] |
+| | TEAK | 5,630 | 0.20 | +0.037 [0.016, 0.057] |
+| HS, corrected (6,866) | SOAP | 1,370 | 0.33 | **+0.177** [0.125, 0.244] |
+| | TEAK | 5,496 | 0.22 | +0.041 [0.019, 0.063] |
+| HS, common (4,028) | SOAP | 1,099 | 0.27 | **+0.183** [0.091, 0.286] |
+| | TEAK | 2,929 | 0.15 | +0.060 [0.036, 0.083] |
+| **Stovall, common (4,028)** | SOAP | 1,099 | 0.17 | **+0.188** [0.106, 0.286] |
+| | TEAK | 2,929 | 0.40 | +0.038 [0.011, 0.070] |
+| Stovall, outside the mask (6,858) | SOAP | 1,385 | 0.11 | **+0.267** [0.190, 0.364] |
+| | TEAK | 5,473 | 0.40 | +0.054 [0.031, 0.078] |
+
+**Fold assignments** (common cells, default plus `--fold-seed` 1–3;
+`fold_robustness/mortality_*_common_conditional.csv`):
+
+| +T over Env+S | HS, common | Stovall, common |
+|---|---|---|
+| SOAP | +0.170 to +0.251 (robust) | +0.124 to +0.188 (robust) |
+| TEAK | +0.054 to +0.075 (robust) | +0.038 to +0.074 (robust) |
+| SOAP − TEAK | +0.097 to +0.197 | +0.051 to +0.150 |
+
+- SOAP is ahead of TEAK under every assignment. Its lowest estimate is
+  above TEAK's highest under both targets.
+- The two sites' CIs are disjoint under the default assignment for every
+  target. On the common cells they overlap under two of the three
+  shuffled assignments for HS and under all three for Stovall. The SOAP
+  side has only 1,099 cells.
+
+**Resilience.** The NDMI resilience contrast of §2 (+0.09 at SOAP vs
++0.04 at TEAK) is a Landsat target and does not depend on either
+mortality product.
+
+**Aridity terciles.** The dry tercile has the largest gain under the
+default assignment for every new target. The order of the dry and wet
+terciles reverses under some shuffled assignments for both targets, so
+§2's reading (no consistent aridity pattern) stands.
+
+**Reading.**
+- **The site contrast does not depend on the mortality product.** Traits
+  add about 0.18–0.27 at SOAP and 0.04–0.06 at TEAK under both products,
+  on the common cells, and outside the mask. SOAP stays ahead under every
+  fold assignment. On the common cells its CIs separate from TEAK's under
+  the default assignment only.
+- **The baselines move, the gains do not.** Env+S predicts Stovall
+  mortality better at TEAK than HS mortality (R² 0.40 vs 0.15), and
+  worse at SOAP (0.17 vs 0.27). The trait gain at each site is nearly
+  the same under both products. So the small TEAK gain is not explained
+  by the disagreement at TEAK, nor by headroom: under HS, TEAK has the
+  lower baseline and still the smaller gain.
+
 ## Summary
 
 1. **Coverage.**
@@ -2299,35 +3452,135 @@ Bold, and every structural-carbon entry: the CI excludes 0.
       recovery in every case.
 21. **For cycle-2 NDMI recovery one June 2018 Landsat scene matches the 2018
     AVIRIS traits** (§29). Beyond Env+S, legacy and the scene, the traits
-    add +0.000 (NEON) and +0.009 (`sierra_nf`). For NIRv recovery and
-    resistance they add +0.007 to +0.021. The N, LMA, lignin and cellulose
-    directions survive the Landsat bands at about half strength.
+    add +0.000 (NEON) and +0.009 (`sierra_nf`); under three shuffled fold
+    assignments +0.010 to +0.013 and +0.008 to +0.016 (§31). For NIRv
+    recovery and resistance they add +0.007 to +0.021. The N, LMA, lignin and
+    cellulose directions survive the Landsat bands at about half strength.
 22. **The Tahoe-box leaf-economics gap is not a retrieval effect** (§30). A
     Yosemite-trained retrieval applied to Tahoe spectra gives N and LMA no
     direction, while the same transfer between NEON and `sierra_nf` keeps
     it. Structural carbon holds with every retrieval.
+23. **In the first drought, a VSWIR series adds more to a Landsat series
+    than as many extra Landsat dates do** (§31). For NDMI recovery: EMIT-like
+    +0.011 to +0.013, 30 m +0.011 to +0.020, at both areas, with either split
+    of six Landsat dates, under every fold assignment tried. In 2018 (NEON)
+    two more Landsat dates match or beat it (EMIT-like −0.003 to −0.013).
+    On top of the denser Landsat series VSWIR still adds. In cycle 2 a second
+    Landsat scene matches the 2018 traits for NDMI responses. Fold assignment
+    moves these contrasts by up to ±0.006, and §29's NEON +0.000 by up to
+    +0.013.
+24. **The recovery shortfall is information, not model capacity** (§32).
+    Tuned boosting adds ≤ +0.016 to Env+S for NDMI recovery, an MLP does
+    worse, every trait and residual-trait gain survives under every learner
+    (with and without lidar), and no learner makes the cross-drought
+    transfer work. For stress response at `sierra_nf` tuning adds +0.038,
+    and the trait gains are larger within the tuned learner.
+25. **The Tahoe-box structural-carbon direction survives a Landsat scene**
+    (§33). Cycle 1, NDMI recovery: residual lignin −0.109 → −0.090 and
+    cellulose −0.116 → −0.095 beyond the nearest clear 2013 scene (−0.084 /
+    −0.092 beyond the June and Jul–Sep composites). Every CI excludes 0
+    under every fold assignment. That keeps more than 80% of the ρ, against
+    65–81% in the Yosemite box.
+26. **Held-out sites in the Yosemite box** (§34). `yosemite_rest` (361,464
+    undisturbed forest cells) and `seki` (389 cells, too few on their own)
+    are defined on the trait-mosaic footprints. Elevation quartile cutpoints
+    for them and the Tahoe box are fixed in `config/heldout_strata.yml` from
+    elevation alone.
+27. **The second-drought test, averaged over five fixed fold splits,
+    passes on the pilot sites** (§35). With the tuned learner, the 2018
+    traits add +0.021 to +0.034 beyond Env+S + legacy (NDMI and NIRv
+    recovery, NDMI resistance; both sites; every split agrees). N, LMA and
+    lignin keep their directions beyond legacy and the 2018 Landsat scene at
+    both sites. Cellulose does not beyond legacy at NEON. Within elevation
+    quartiles the `sierra_nf` transfer ranks NDMI recovery correctly (§21).
+28. **Most small contrasts survive reassigning blocks to folds** (§36).
+    Three shuffled fold assignments beside the default leave robust:
+    - the date-for-date VSWIR lead over a Landsat scene;
+    - the structural-carbon skill beyond Landsat;
+    - the AVIRIS-change add-on;
+    - every neighbour-baseline gain;
+    - every cycle-2 gain of the 2018 traits beyond legacy;
+    - the LVIS and ASO residual gains for resilience and stress response;
+    - the no-lidar skill kept (0.92–1.01).
+
+    Fold-sensitive: stress response over the 2013 lidar trees at NEON
+    (+0.008 to +0.028) and resistance over ASO at NEON (+0.005 to
+    +0.010).
+29. **A structural-carbon score passes where cellulose alone does not**
+    (§37). The mean of z-scored lignin and cellulose keeps its negative
+    direction with cycle-2 recovery on every residual base at both pilot
+    sites, for NDMI and NIRv recovery, under every split. Beyond legacy and
+    the 2018 Landsat scene, NDMI recovery gives −0.046 [−0.074, −0.019]
+    (NEON) and −0.077 (`sierra_nf`). Lignin alone gives −0.066 and −0.089.
+30. **Candidate definitions of the held-out remainder** (§38).
+    - Pooling `seki` changes no cutpoint by more than 2 m.
+    - A conifer filter or a 1,178 m floor removes about a third of
+      `yosemite_rest` (the foothill woodland).
+    - Either way, two thirds of what remains lies above the pilot sites'
+      upper elevation quartile.
+    - On conifer pilot cells (29% fewer at NEON) the rule passes every part
+      at both sites. That includes NEON cellulose beyond legacy (−0.05),
+      which fails on all cells.
+31. **The held-out test cells are fixed** (§39): the conifer cells of
+    `stanislaus` (49,442) and `yosemite_rest` (234,713), with their
+    elevation cutpoints; `seki` stays held out and is not tested.
+32. **The structural-carbon direction holds in the pilots' high country**
+    (§40). Above each pilot's upper conifer quartile, pooled over both
+    pilots, the score on Env+S+Leg+L1 gives −0.084 [−0.127, −0.040] for
+    NDMI recovery (red-fir/subalpine cells: −0.086). It keeps its sign in
+    every subset; `sierra_nf` alone is borderline high up (−0.067, CI to
+    0), mostly because cellulose loses its direction there.
+33. **A NAIP-based mortality product agrees with the lidar trees at SOAP,
+    not at TEAK** (§41). At 90 m outside the flight-line mask, Stovall et
+    al. (2019) vs the lidar-tree cohort gives ρ 0.84 at SOAP (Stovall
+    −0.10) and ρ 0.37 at TEAK (Stovall +0.28, more than double). Timing
+    cannot explain TEAK. The mortality results hold under both targets:
+    traits add +0.07 to +0.09 over Env+S, and lidar structure absorbs
+    nearly all of it. Residual traits stay ≤ +0.033, and none survives
+    every fold assignment under either target or any lidar source. A
+    gridding fix to the lidar-tree fraction moves nothing material.
+34. **The SOAP–TEAK mortality contrast holds under both mortality
+    products** (§42). On the common cells, traits add +0.183 at SOAP vs
+    +0.060 at TEAK with the lidar-tree target, and +0.188 vs +0.038 with
+    the NAIP-based one. SOAP stays ahead under every fold assignment. The
+    two sites' CIs separate under the default assignment only.
 
 ## Code
 
-`fetch_landsat_c2_ee.py` (`--scene`), `fetch_disturbance_aois.py`, `aoi_env_layers.py`,
+`fetch_landsat_c2_ee.py` (`--scene`), `fetch_disturbance_aois.py`, `aoi_env_layers.py` (`--masks-only`, `--disturbance-dir`),
+`fetch_heldout_masks.py`, `proto_heldout_strata.py` (`--conifer`,
+`--min-elevation`, `--max-elevation`, `--pool`, `--key`; `test_cells`,
+`group_share`), `collect_fold_seeds.py`,
 `query_airborne_coverage.py`,
-`response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`,
+`response_common.py`, `proto_response_metrics.py`, `proto_trait_dynamics.py`
+(`--interval`, `--fold-seed`, `--tag`),
 `proto_response_traits.py` (`--structure`, `--ablation`, `--neighbour`,
 `--traits`/`--cwc`, `--trait-year`, `--line-z`, `--raw-block`,
-`--save-preds`, `--gains-only`),
+`--save-preds`, `--gains-only`, `--fold-seed`, `--tag`),
 `proto_response_transfer.py`, `query_lidar_coverage.py`,
 `fetch_lidar_structure.py`, `proto_lidar_validation.py`,
 `proto_trait_stability.py`, `fetch_wdts_cwc.py`, `fetch_wdts_traits.py`
 (`--date`, `--suffix`), `fetch_forest_type.py`,
-`proto_trait_directions.py` (`--group`, incl. `substrate`; `--trait-cells`/`--trait-source`),
-`proto_forward_pilot.py` (`--landsat`, `--landsat-composites`),
+`proto_trait_directions.py` (`--group`, incl. `substrate`; `--trait-cells`/`--trait-source`;
+`rho_within_splits`),
+`proto_forward_pilot.py` (`--landsat`, `--landsat-composites`, `--tag`,
+`--fold-seed`, `--rule` with `--rule-scene`, `--learner`, `--resid-learner`,
+`--rule-directions-only`, `--conifer-only`, `--rule-subset`, `--rule-pool`; `ECOPRO_JOBS` worker processes
+via `response_common.pmap`),
 `proto_transfer_diagnostics.py`,
-`proto_structure_from_spectra.py`, `proto_trait_diversity.py`,
+`proto_structure_from_spectra.py` (`--fold-seed`, `--tag`), `proto_trait_diversity.py`,
 `proto_spaceborne_sim.py` (`refl` with `--year`, `simulate` with
-`--l8`/`--seed`, `compare`), `proto_spaceborne_only.py` (`compare`,
-`carbon`), `proto_spaceborne_ts.py` (`refl`, `emulate`, `compare`), `proto_retrieval_transfer.py` (`emulate`, `score`),
+`--l8`/`--seed`, `compare`), `proto_spaceborne_only.py` (`compare` with
+`--no-stack`, `carbon` with `--resid-landsat` and `--skip-ladder`; both
+with `--fold-seed` and `--tag`), `proto_spaceborne_ts.py` (`refl`, `emulate`, `compare` with `--landsat-extra` and `--fold-seed`),
+`proto_retrieval_transfer.py` (`emulate`, `score`),
+`proto_model_capacity.py` (`within`, `transfer`, `forward`; learners in
+`response_common.make_model`),
 `proto_aviris5_bridge.py` (`--traits`, `--n-comp`), `fetch_geology.py`,
-`query_emit_coverage.py`. Run from `src/` in
+`query_emit_coverage.py`, `fetch_stovall2019.py`, `fetch_queally2025.py`,
+`proto_stovall_check.py` (`--skip-matching`); `--mortality-source` and
+`--mortality-cells` in `proto_response_traits.py` and
+`proto_lidar_validation.py` (`response_common.mortality_target`). Run from `src/` in
 the `ecopro` env. Earth Engine uses the Cloud project `ecopro-509818`.
 `shap` is installed with pip. Run concurrent model jobs with
 `OMP_NUM_THREADS` set so that their threads do not exceed the cores (e.g. 3
