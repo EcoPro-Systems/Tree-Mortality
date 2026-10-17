@@ -81,9 +81,10 @@ def crosstrack_normalize(a, line, elev, transform):
     return out
 
 
-def lidar_cohort(transform, shape):
-    """Per-pixel counts of cohort-A trees (live 2013, same status 2017 and
-    2018) and of those dead by 2017.
+def lidar_cohort(transform, shape, cohort='A'):
+    """Per-pixel counts of cohort trees and of those that died: cohort A
+    (live 2013, same status 2017 and 2018; died by 2017) or cohort B (live
+    2018 and 2019, observed 2021; died by 2021).
 
     Pixels without cohort trees count 0 in both layers, so the cell means
     give died/n = Σdied/Σn and n * n_px = Σn. (Before 2026-10-09 they were
@@ -91,13 +92,19 @@ def lidar_cohort(transform, shape):
     with treeless pixels.)"""
     from proto_predisposition_neon import load_trees, pixel_index
     df = load_trees(rc.E / 'hemming_schroeder2023')
-    a = df[(df.live2013 == 1) & (df.live2017 == df.live2018)
-           & df.live2017.notna()]
+    if cohort == 'A':
+        a = df[(df.live2013 == 1) & (df.live2017 == df.live2018)
+               & df.live2017.notna()]
+        dead = a.live2017.values == 0
+    else:
+        a = df[(df.live2018 == 1) & (df.live2019 == 1)
+               & df.live2021.notna()]
+        dead = a.live2021.values == 0
     row, col = pixel_index(a, transform, shape)
     ok = row >= 0
     idx = row[ok] * shape[1] + col[ok]
     n = np.bincount(idx, minlength=shape[0] * shape[1]).astype(float)
-    died = np.bincount(idx, weights=(a.live2017.values[ok] == 0),
+    died = np.bincount(idx, weights=dead[ok],
                        minlength=shape[0] * shape[1])
     return n.reshape(shape), died.reshape(shape)
 

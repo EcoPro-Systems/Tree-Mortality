@@ -32,6 +32,8 @@ lidar mortality fraction (trees live in 2013, dead by 2017-18).
                it partly records the die-off: a stricter-than-pre-drought
                control
      lvis2008  LVIS Sep 2008 footprints (fetch_lidar_structure.py)
+     gedi_lsm  not lidar: the 2015 GEDI-fused Landsat-model canopy height
+               (fetch_gedi_fusion.py), a spaceborne structure block
 5. Ablations of the recovery gain (--ablation; with --structure the base
    model also includes that lidar source, on its cells). Gain of each
    trait set over the base, for NDMI recovery and alternative definitions:
@@ -52,6 +54,18 @@ lidar mortality fraction (trees live in 2013, dead by 2017-18).
    neighbour_mean). Ladder B0 | Env+S | Env+S+B0 | Env+S+T | Env+S+B0+T |
    Env+S+B0+Tres: do traits add skill that spatial autocorrelation of the
    response does not already give?
+7. Canopy-water check (--water-block; with --structure also over each
+   lidar source). On the cells with the water block W: B | B+W | B+T |
+   B+Tres | B+W+T | B+W+Tres, B = Env+S or Env+S+L, Tres residualized on B
+   and on B+W. W is one of
+     aviris      2013 AVIRIS EWT (980 and 1200 nm), NDWI and the 1200 nm
+                 band depth (fetch_wdts_cwc.py), cross-track normalized
+     brodrick    Landsat-based dry-season CWC of Brodrick et al. 2019
+                 (fetch_brodrick2019.py): 2013 level and 2011 -> 2013 change
+     both        the two together
+     brodrick15  brodrick plus the 2011 -> 2015 change (overlaps the
+                 response window; a check only)
+   --learner sets the ladder learner (e.g. hgb_tuned); residuals stay hgb.
 
 Traits use the 2013 v2 mosaic (cross-track normalized, as in
 proto_trait_dynamics.py). Alternatives for checks: --traits / --cwc read
@@ -109,9 +123,20 @@ S_ASO = ['aso_rh98', 'aso_rh25', 'aso_rh50', 'aso_rh75', 'aso_pai', 'aso_fhd',
          'aso_cover2', 'aso_cover5', 'aso_frac_tall']
 S_LVIS = ['lvis_rh100_mean', 'lvis_rh100_max', 'lvis_rh50_mean',
           'lvis_rh25_mean', 'lvis_rh50_ratio', 'lvis_frac_tall']
-STRUCTURES = {'neon2013': S_LIDAR, 'aso': S_ASO, 'lvis2008': S_LVIS}
+S_GEDI_LSM = ['h_lsm_2015']
+STRUCTURES = {'neon2013': S_LIDAR, 'aso': S_ASO, 'lvis2008': S_LVIS,
+              'gedi_lsm': S_GEDI_LSM}
 MIN_COVER = 0.7  # fraction of a cell's pixels with lidar
 PRED_KEYS = ['cell_row', 'cell_col', 'block1000', 'block5000']
+# canopy-water blocks of --water-block: AVIRIS 2013 water features
+# (fetch_wdts_cwc.py), and the Landsat-based CWC of Brodrick et al. 2019
+# (fetch_brodrick2019.py): the 2013 level and the 2011 -> 2013 change
+# (pre-drought to the trait year); brodrick15 adds 2011 -> 2015, which
+# overlaps the 2014-16 response window
+AV_WATER = ['ewt980', 'ewt1200', 'ndwi', 'bd1200']
+BR_WATER = {'brodrick': ['cwc_2013', 'pc_cwc_1113'],
+            'brodrick15': ['cwc_2013', 'pc_cwc_1113', 'pc_cwc_1115']}
+WATER_BLOCKS = ('aviris', 'brodrick', 'both', 'brodrick15')
 
 
 def pred_frame(sub, target, preds):
@@ -230,12 +255,15 @@ def structure_cells(d, aoi, k, source):
         if 'hs_ok' in d:  # mortality target from proto_stovall_check.py
             return d[d.hs_ok]
         return d[d.mort_frac.notna()] if 'mort_frac' in d else d.iloc[:0]
-    f = rc.E / 'lidar' / f'{aoi}_lidar.nc'
+    f = rc.E / ('structure' if source == 'gedi_lsm' else 'lidar') / \
+        f'{aoi}_{"gedi_fusion" if source == "gedi_lsm" else "lidar"}.nc'
     if not f.exists():
         return d.iloc[:0]
     ds = xr.open_dataset(f)
-    cov = 'aso_cov' if source == 'aso' else 'lvis_cov'
+    cov = {'aso': 'aso_cov', 'lvis2008': 'lvis_cov'}.get(source, 'g_cov')
     cols = STRUCTURES[source] + [cov]
+    if source == 'gedi_lsm':  # spaceborne-fused: covered where it has values
+        ds[cov] = np.isfinite(ds[S_GEDI_LSM[0]]).astype(np.float32)
     if not all(c in ds for c in cols):
         return d.iloc[:0]
     env = rc.open_env(aoi)
@@ -248,7 +276,7 @@ def structure_cells(d, aoi, k, source):
         L, on=['cell_row', 'cell_col'], how='inner')
 
 
-def lidar_check(d, source, targets, n_boot, preds=None):
+def lidar_check(d, source, targets, n_boot, preds=None, learner='hgb'):
     """Do traits add skill beyond lidar structure on the covered cells?
 
     preds: optional list that collects each target's prediction frame"""
@@ -271,7 +299,8 @@ def lidar_check(d, source, targets, n_boot, preds=None):
         sub = d[d[t].notna() & np.isfinite(d[t])]
         w = 'mort_n' if t == 'mort_frac' else None
         r, p = rc.ladder(sub, t, fs, 'block1000', weight=w, n_boot=n_boot,
-                         pairs=pairs, extra_blocks=('block5000',))
+                         pairs=pairs, extra_blocks=('block5000',),
+                         learner=learner)
         rows += r
         if preds is not None:
             preds.append(pred_frame(sub, t, p))
@@ -283,6 +312,72 @@ def lidar_check(d, source, targets, n_boot, preds=None):
             for k in ('Env+S+T-Env+S', 'Env+S+L-Env+S',
                       'Env+S+L+T-Env+S+L', 'Env+S+L+Tres-Env+S+L'))
         click.echo(f'  {t:20s} n={len(sub):6d}  {msg}')
+    return rows
+
+
+def water_layers(d, aoi, k, block, y0=2013):
+    """Add the canopy-water block (columns W_<source>_<var>) to d; returns
+    (d, W). Cells are kept where every W column has a value."""
+    transform, shape, _ = rc.aoi_info(aoi)
+    env = rc.open_env(aoi)
+    layers = {}
+    if block in ('aviris', 'both'):
+        cwc = xr.open_dataset(rc.E / 'wdts' / f'{aoi}_cwc.nc')
+        src = cwc.source_line.sel(year=y0).values
+        for v in AV_WATER:
+            a = cwc[v].sel(year=y0).values.astype(np.float32)
+            layers[f'W_av_{v}'] = crosstrack_normalize(
+                a, src, env.elevation.values, transform)
+    if block != 'aviris':
+        br = xr.open_dataset(rc.E / 'brodrick2019' / f'{aoi}_cwc.nc')
+        for v in BR_WATER['brodrick15' if block == 'brodrick15'
+                          else 'brodrick']:
+            layers[f'W_br_{v}'] = br[v].values.astype(np.float32)
+    W = list(layers)
+    t = rc.cell_table(layers, rc.undisturbed(env, 2019), k)
+    d = d.drop(columns=[c for c in W if c in d]).merge(
+        t[['cell_row', 'cell_col'] + W], on=['cell_row', 'cell_col'])
+    return d[d[W].notna().all(1)].reset_index(drop=True), W
+
+
+def water_check(d, W, base, base_name, targets, n_boot, learner='hgb',
+                preds=None):
+    """Do traits add skill beyond canopy water (W)? On the same cells:
+    B | B+W | B+T | B+Tres | B+W+T | B+W+Tres, with Tres residualized on B
+    and Tres|W on B+W (B = Env+S, or Env+S+L for a lidar source)"""
+    _, T, _ = feature_sets(d)
+    R = pd.DataFrame({c.replace('T_', 'R_'): rc.crossfit_residuals(
+        d, c, base, 'block1000') for c in T}, index=d.index)
+    RW = pd.DataFrame({c.replace('T_', 'RW_'): rc.crossfit_residuals(
+        d, c, base + W, 'block1000') for c in T}, index=d.index)
+    d = pd.concat([d, R, RW], axis=1)
+    b = base_name
+    fs = {b: base, f'{b}+W': base + W, f'{b}+T': base + T,
+          f'{b}+Tres': base + list(R.columns), f'{b}+W+T': base + W + T,
+          f'{b}+W+Tres': base + W + list(RW.columns)}
+    pairs = [(b, f'{b}+W'), (b, f'{b}+T'), (b, f'{b}+Tres'),
+             (f'{b}+W', f'{b}+W+T'), (f'{b}+W', f'{b}+W+Tres')]
+    rows = []
+    for t in targets:
+        if t not in d or d[t].notna().sum() < 500:
+            continue
+        sub = d[d[t].notna() & np.isfinite(d[t])]
+        w = 'mort_n' if t == 'mort_frac' else None
+        r, p = rc.ladder(sub, t, fs, 'block1000', weight=w, n_boot=n_boot,
+                         pairs=pairs, extra_blocks=('block5000',),
+                         learner=learner)
+        rows += r
+        if preds is not None:
+            preds.append(pred_frame(sub, t, p))
+        g = {f'{x["features"]}-{x["compare"]}': x for x in r
+             if x['compare'] and x['boot_blocks'] == 'block1000'}
+        a = {x['features']: x['r2'] for x in r
+             if not x['compare'] and x['boot_blocks'] == 'block1000'}
+        click.echo(f'  {t:20s} n={len(sub):6d} {b} {a[b]:.3f}  ' + '  '.join(
+            f'{k.split("-")[0].replace(b, "")} {g[k]["r2"]:+.3f} '
+            f'[{g[k]["lo"]:+.3f},{g[k]["hi"]:+.3f}]' for k in (
+                f'{b}+W-{b}', f'{b}+T-{b}', f'{b}+W+T-{b}+W',
+                f'{b}+W+Tres-{b}+W')))
     return rows
 
 
@@ -499,11 +594,19 @@ def shap_summary(d, cols, target, max_n=20000):
               help='Cells of the mortality target: all, outside the '
                    'flight-line mask (unmasked), or unmasked with both '
                    'cohorts (common)')
+@click.option('--water-block', type=click.Choice(WATER_BLOCKS),
+              help='Run only the canopy-water check: trait gains beyond '
+                   'this canopy-water block, over Env+S and (with '
+                   '--structure) over Env+S+L')
+@click.option('--learner', type=click.Choice(rc.LEARNERS), default='hgb',
+              show_default=True,
+              help='Learner of the ladders (residuals stay on hgb)')
 @click.option('--tag', default='', help='Suffix of the output files')
 def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
          n_boot, structures, ablation, traits_path, cwc_path, trait_year,
          line_z, neighbour, neighbour_radius, raw_block_path, save_preds,
-         gains_only, fold_seed, mortality_source, mortality_cells, tag):
+         gains_only, fold_seed, mortality_source, mortality_cells,
+         water_block, learner, tag):
     rc.FOLD_SEED = fold_seed
     if (traits_path or cwc_path or raw_block_path) and len(aois) > 1:
         raise click.UsageError('--traits/--cwc/--raw-block take a single '
@@ -530,6 +633,39 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
                     old = old[~((old.aoi == aoi) & (old.scale_m == scale_m) &
                                 (old.radius_m == neighbour_radius))]
                 pd.concat([old, pd.DataFrame(r)]).to_csv(f, index=False)
+                continue
+            if water_block:
+                dw, W = water_layers(d, aoi, k, water_block, trait_year)
+                runs = [('Env+S', dw, ENV + S_WALL)]
+                for src in structures:
+                    sub = structure_cells(dw, aoi, k, src)
+                    runs.append(('Env+S+L', sub,
+                                 ENV + S_WALL + STRUCTURES[src]))
+                for (label, dd, base), src in zip(
+                        runs, (None,) + tuple(structures)):
+                    click.echo(f'[{aoi} {scale_m} m] water {water_block} '
+                               f'over {label} ({src or "all cells"}): '
+                               f'{len(dd)} cells')
+                    if len(dd) < 500:
+                        continue
+                    pf = [] if save_preds else None
+                    r = water_check(dd, W, base, label, targets, n_boot,
+                                    learner, pf)
+                    check = src or 'none'
+                    if save_preds:
+                        write_preds(pf, outputdir / f'preds_water_{water_block}'
+                                    f'_{check}_{aoi}_{scale_m}m{tag}.csv.gz')
+                    for x in r:
+                        x.update(aoi=aoi, scale_m=scale_m, water=water_block,
+                                 check=check, learner=learner,
+                                 fold_seed=fold_seed)
+                    f = outputdir / f'water_check_{water_block}{tag}.csv'
+                    old = pd.read_csv(f) if f.exists() else pd.DataFrame()
+                    if len(old):
+                        old = old[~((old.aoi == aoi) &
+                                    (old.scale_m == scale_m) &
+                                    (old.check == check))]
+                    pd.concat([old, pd.DataFrame(r)]).to_csv(f, index=False)
                 continue
             if ablation:
                 runs = [('Env+S', d, ENV + S_WALL)]
@@ -561,7 +697,7 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
                     if len(sub) < 500:
                         continue
                     pf = [] if save_preds else None
-                    r = lidar_check(sub, src, targets, n_boot, pf)
+                    r = lidar_check(sub, src, targets, n_boot, pf, learner)
                     if save_preds:
                         write_preds(pf, outputdir / f'preds_lidar_{src}_'
                                     f'{aoi}_{scale_m}m{tag}.csv.gz')
@@ -597,7 +733,8 @@ def main(outputdir, aois, response_dir, dynamics_dir, scales, targets,
                     ('B1', 'Env+S')] if p[1] in fs]
                 r, p = rc.ladder(sub, t, fs, 'block1000', weight=w,
                                  n_boot=n_boot, pairs=pairs,
-                                 extra_blocks=('block5000',))
+                                 extra_blocks=('block5000',),
+                                 learner=learner)
                 for x in r:
                     x.update(aoi=aoi, scale_m=scale_m)
                 rows += r

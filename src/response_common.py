@@ -487,11 +487,13 @@ def ladder(df, target, fsets, blocks, weight=None, seed=0, n_boot=1000,
     ff = fold_features or {}
     lr = learner if isinstance(learner, dict) else \
         {name: learner for name in fsets}
-    preds = {name: oof_predict(d, cols, target, blocks, weight, seed,
-                               fold_features=ff.get(name),
-                               learner=lr.get(name, 'hgb'))
-             for name, cols in fsets.items()}
     names = list(fsets)
+    # the fold seed is passed explicitly: pmap workers do not see a
+    # FOLD_SEED set at run time in this process
+    preds = dict(zip(names, pmap(oof_predict, [dict(
+        df=d, cols=fsets[name], target=target, blocks=blocks, weight=weight,
+        seed=seed, fold_features=ff.get(name), learner=lr.get(name, 'hgb'),
+        fold_seed=FOLD_SEED) for name in names])))
     pairs = pairs or list(zip(names[:-1], names[1:]))
     w = None if weight is None else d[weight].values
     rows = []

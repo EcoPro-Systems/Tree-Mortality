@@ -76,6 +76,11 @@ quartile; highfir: >= 50% red fir and subalpine EVT), with the residuals
 still fitted on all of them; --rule-pool pools the directions over the
 AOIs (strata and 1 km blocks kept apart by AOI).
 
+--structure-block aef adds the 2018-19 mean of the GEDI-fused AEF canopy
+height (rh98), cover and biomass (fetch_gedi_fusion.py) to S in the --rule
+skill contrasts and residual bases (S_aef); the cycle-1 -> cycle-2
+transfer keeps the wall-to-wall S, which cycle 1 also has.
+
 Held-out AOIs (response_common.HELD_OUT) are refused.
 
     python proto_forward_pilot.py $E/hls_results/forward_pilot \
@@ -97,6 +102,21 @@ from proto_response_traits import TRAITS, ELEV_BAND, trait_layers
 TARGETS = [f'{v}_{m}' for v in ('ndmi', 'nirv')
            for m in ('resistance', 'recovery', 'resilience')]
 MIN_CELLS = 5000
+
+
+S_AEF = ['aef_rh98_1819', 'aef_cover_1819', 'aef_agbd_1819']
+
+
+def add_aef(d, aoi, k):
+    """Merge the 2018-19 mean of the AEF structure maps (S_AEF)"""
+    import xarray as xr
+    g = xr.open_dataset(rc.E / 'structure' / f'{aoi}_gedi_fusion.nc')
+    layers = {f'aef_{v}_1819': (g[f'{v}_aef_2018'].values +
+                                g[f'{v}_aef_2019'].values) / 2
+              for v in ('rh98', 'cover', 'agbd')}
+    t = rc.cell_table(layers, rc.undisturbed(rc.open_env(aoi), 2025), k)
+    return d.merge(t[['cell_row', 'cell_col'] + S_AEF],
+                   on=['cell_row', 'cell_col'], how='left')
 
 
 def standardize(d, cols, rank):
@@ -306,7 +326,7 @@ def direction_rows(dd, t, strata, rcols, bases, fold_seeds, dir_boot,
 
 def rule_check(d, c1, aoi, k, targets, scene, fold_seeds, n_boot, dir_boot,
                learner, resid_learner, directions_only=False,
-               conifer=False, subsets=()):
+               conifer=False, subsets=(), extra_s=()):
     """The averaged-over-splits rule on one AOI; returns (ladder rows,
     direction rows, transfer rows, pool). directions_only skips the skill
     and transfer parts. subsets (SUBSETS names) adds direction rows on
@@ -321,7 +341,8 @@ def rule_check(d, c1, aoi, k, targets, scene, fold_seeds, n_boot, dir_boot,
                f'fold seeds {", ".join(map(str, fold_seeds))}; {learner}')
     T13 = [f'T_{x}_13' for x in TRAITS] + ['T_qcfc_13']
     T18 = [f'T_{x}_18' for x in TRAITS] + ['T_qcfc_18']
-    es = ENV + S_WALL
+    es0 = ENV + S_WALL  # cycle 1 has no S_aef: the transfer keeps es0
+    es = es0 + list(extra_s)
     legall = [f'leg_{x}' for x in TARGETS]
     L1 = lb['L1']
     fs = {'Env+S': es, 'Env+S+Leg': es + legall,
@@ -391,8 +412,8 @@ def rule_check(d, c1, aoi, k, targets, scene, fold_seeds, n_boot, dir_boot,
         # cycle 1 -> cycle 2, pooled and within elevation quartiles
         a = c1[c1[t].notna()]
         q = elevation_stratum(sub.elevation.values, cuts)
-        for name, cols_a, cols_b in (('Env+S', es, es),
-                                     ('Env+S+T', es + T13, es + T18)):
+        for name, cols_a, cols_b in (('Env+S', es0, es0),
+                                     ('Env+S+T', es0 + T13, es0 + T18)):
             m = rc.fit_model(learner,
                              a[cols_a].set_axis(generic(cols_a), axis=1),
                              a[t].values, groups=a.block1000.values)
@@ -472,10 +493,12 @@ def rank_boot(y, p, blocks, n_boot, seed=0):
 @click.option('--rule-pool', is_flag=True,
               help='--rule directions also pooled over the AOIs '
                    '(within-AOI strata, blocks resampled jointly)')
+@click.option('--structure-block', type=click.Choice(['aef']),
+              help='--rule with the GEDI-fused AEF structure added to S')
 def main(outputdir, aois, scale, rank, n_boot, scenes, landsat_composites,
          dir_boot, tag, fold_seed, rule, rule_scene, targets, learner,
          resid_learner, rule_directions_only, conifer_only, subsets,
-         rule_pool):
+         rule_pool, structure_block):
     rc.FOLD_SEED = fold_seed
     outputdir.mkdir(parents=True, exist_ok=True)
     scale_m = rc.RES * scale
@@ -486,13 +509,17 @@ def main(outputdir, aois, scale, rank, n_boot, scenes, landsat_composites,
         pools = {}
         for aoi in aois:
             d, c1 = build(aoi, scale, rank, conifer_only)
+            extra = []
+            if structure_block == 'aef':
+                d, extra = add_aef(d, aoi, scale), S_AEF
             tags = dict(aoi=aoi, scale_m=scale_m, standardize=std,
                         learner=learner, scene=rule_scene,
-                        cells='conifer' if conifer_only else 'all')
+                        cells='conifer' if conifer_only else 'all',
+                        structure=structure_block or 'wall')
             *res, pools[aoi] = rule_check(
                 d, c1, aoi, scale, list(targets), rule_scene,
                 rc.FOLD_SEEDS, n_boot, dir_boot, learner, resid_learner,
-                rule_directions_only, conifer_only, subsets)
+                rule_directions_only, conifer_only, subsets, extra)
             for name, rows in zip(out, res):
                 out[name] += [dict(x, **tags) for x in rows]
                 pd.DataFrame(out[name]).to_csv(

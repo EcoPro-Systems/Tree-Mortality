@@ -15,6 +15,13 @@ used to control for?
    gain means ASO records the die-off itself. Also the within-strata ρ of
    each ASO variable with the mortality fraction.
 3. Maps of the main height variables.
+4. --gedi: the same two checks for the annual GEDI-fused maps
+   (fetch_gedi_fusion.py) instead, written to gedi_agreement.csv and
+   gedi_leakage.csv: agreement of the AEF rh98/cover (2018-19 mean) and the
+   2015 Landsat-model height with each lidar source, GLAD 2010 and TCC 2013
+   given for reference, with the years between the two; and whether the
+   2015 or 2016 Landsat-model height adds to the mortality fraction beyond
+   pre-drought structure (Env+S, TCC 2013 and the NEON 2013 lidar trees).
 --mortality-source / --mortality-cells swap the mortality target as in
 proto_response_traits.py (e.g. the NAIP-based cohort of
 proto_stovall_check.py); the agreement tables do not depend on them.
@@ -45,6 +52,34 @@ PAIRS = [('lidar_h_mean', 'aso_chm_mean'), ('lidar_h_p90', 'aso_rh98'),
          ('glad_h2010', 'aso_rh98'), ('glad_h2010', 'lvis_rh100_mean'),
          ('glad_h2010', 'lidar_h_p90'), ('tcc2010', 'aso_cover5')]
 ELEV_BAND = 200
+GEDI_PAIRS = [(x, y) for y in ('aef_rh98_1819', 'h_lsm_2015')
+              for x in ('lidar_h_p90', 'lvis_rh100_mean', 'aso_rh98',
+                        'glad_h2010')] + \
+    [(x, 'aef_cover_1819') for x in ('aso_cover5_pct', 'tcc2013')] + \
+    [('glad_h2010', 'lidar_h_p90'), ('glad_h2010', 'aso_rh98'),
+     ('tcc2013', 'aso_cover5_pct')]
+# nominal acquisition year of each layer (ASO: the snow-off flights)
+YEAR = {'lidar_h_p90': 2013, 'lvis_rh100_mean': 2008, 'glad_h2010': 2010,
+        'tcc2013': 2013, 'aef_rh98_1819': 2018.5, 'aef_cover_1819': 2018.5,
+        'h_lsm_2015': 2015}
+ASO_YEAR = {AOI: 2015, 'sierra_nf': 2016}
+
+
+def gedi_layers(d, aoi, k):
+    """Add the GEDI-fused layers and TCC 2013 to the cell table"""
+    env = rc.open_env(aoi)
+    g = xr.open_dataset(rc.E / 'structure' / f'{aoi}_gedi_fusion.nc')
+    layers = {'tcc2013': env.tcc2013.values.astype(np.float32)}
+    for v in ('rh98', 'cover'):
+        layers[f'aef_{v}_1819'] = (g[f'{v}_aef_2018'].values +
+                                   g[f'{v}_aef_2019'].values) / 2
+    for y in (2015, 2016):
+        layers[f'h_lsm_{y}'] = g[f'h_lsm_{y}'].values
+    t = rc.cell_table(layers, rc.undisturbed(env, 2019), k)
+    d = d.merge(t[['cell_row', 'cell_col'] + list(layers)],
+                on=['cell_row', 'cell_col'], how='left')
+    d['aso_cover5_pct'] = 100 * d.aso_cover5
+    return d
 
 
 def cells(aoi, k, response_dir, dynamics_dir, mortality_source='dynamics',
@@ -111,7 +146,12 @@ def fig_maps(aoi, path):
               default='dynamics', show_default=True)
 @click.option('--mortality-cells', type=click.Choice(rc.MORTALITY_CELLS),
               default='all', show_default=True)
-def main(outputdir, n_boot, mortality_source, mortality_cells):
+@click.option('--gedi', is_flag=True,
+              help='Agreement and leakage of the GEDI-fused maps only')
+def main(outputdir, n_boot, mortality_source, mortality_cells, gedi):
+    if gedi:
+        return gedi_checks(outputdir, n_boot, mortality_source,
+                           mortality_cells)
     outputdir.mkdir(parents=True, exist_ok=True)
     E = rc.E / 'hls_results'
     dirs = {AOI: (E / 'response', E / 'trait_dynamics'),
@@ -170,6 +210,54 @@ def main(outputdir, n_boot, mortality_source, mortality_cells):
     u = pd.DataFrame(uni)
     u.to_csv(outputdir / 'structure_vs_mortality.csv', index=False)
     click.echo(u.round(3).to_string(index=False))
+
+
+def gedi_checks(outputdir, n_boot, mortality_source, mortality_cells):
+    outputdir.mkdir(parents=True, exist_ok=True)
+    E = rc.E / 'hls_results'
+    dirs = {AOI: (E / 'response', E / 'trait_dynamics'),
+            'sierra_nf': (E / 'response_sierra', E / 'trait_dynamics_sierra')}
+    agree, leak = [], []
+    for aoi, (rdir, ddir) in dirs.items():
+        k = 3
+        d = gedi_layers(cells(aoi, k, rdir, ddir, mortality_source,
+                              mortality_cells), aoi, k)
+        years = dict(YEAR, aso_rh98=ASO_YEAR[aoi],
+                     aso_cover5_pct=ASO_YEAR[aoi])
+        for a, b in GEDI_PAIRS:
+            ok = d[a].notna() & d[b].notna()
+            if ok.sum() < 100:
+                continue
+            agree.append(dict(aoi=aoi, scale_m=rc.RES * k, x=a, y=b,
+                              n=int(ok.sum()), years_apart=years[b] - years[a],
+                              rho=spearmanr(d[a][ok], d[b][ok])[0],
+                              median_diff=float(np.median(
+                                  d[b][ok] - d[a][ok]))))
+        if aoi != AOI:
+            continue
+        es = ENV + S_WALL + ['tcc2013']
+        for src in ('h_lsm_2015', 'h_lsm_2016'):
+            sub = d[d.mort_frac.notna() & d[src].notna()
+                    & d.get('hs_ok', True)]
+            fs = {'Env+S': es, 'Env+S+Lneon': es + S_LIDAR,
+                  'Env+S+G': es + [src], 'Env+S+Lneon+G': es + S_LIDAR + [src]}
+            r, _ = rc.ladder(sub, 'mort_frac', fs, 'block1000',
+                             weight='mort_n', n_boot=n_boot,
+                             pairs=[('Env+S', 'Env+S+G'),
+                                    ('Env+S', 'Env+S+Lneon'),
+                                    ('Env+S+Lneon', 'Env+S+Lneon+G')])
+            for x in r:
+                x.update(aoi=aoi, scale_m=rc.RES * k, source=src)
+            leak += r
+            g = {f'{x["features"]}-{x["compare"]}': x for x in r
+                 if x['compare'] and x['boot_blocks'] == 'block1000'}
+            click.echo(f'[{aoi} 90 m] mortality, {src} ({len(sub)} cells): '
+                       + '  '.join(f'{kk} {v["r2"]:+.3f} [{v["lo"]:+.3f},'
+                                   f'{v["hi"]:+.3f}]' for kk, v in g.items()))
+    a = pd.DataFrame(agree)
+    a.to_csv(outputdir / 'gedi_agreement.csv', index=False)
+    click.echo(a.round(3).to_string(index=False))
+    pd.DataFrame(leak).to_csv(outputdir / 'gedi_leakage.csv', index=False)
 
 
 if __name__ == '__main__':

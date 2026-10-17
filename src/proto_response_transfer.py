@@ -47,18 +47,12 @@ TARGETS = [f'{v}_{m}' for v in ('ndmi', 'nirv')
 INDICES = ['ndmi', 'nirv', 'ndvi']
 
 
-def build_cycle(aoi, k, c, valid, allow_held_out=False):
-    if c == 2:
-        rc.check_cycle2(aoi, allow_held_out)
+def cycle_forcing(aoi, c):
+    """Env + S layers of a cycle on the 30 m grid: climate normals, the
+    cycle's drought anomalies, terrain and wall-to-wall structure. No
+    Landsat response is read, so this is allowed for held-out AOIs."""
     cy = CYCLES[c]
     env = rc.open_env(aoi)
-    comp = xr.open_dataset(rc.E / 'landsat_composites' /
-                           f'{aoi}_{cy["variant"]}_doy182-273.nc')
-    years = list(range(cy['base'][0], cy['post'][1] + 1))
-    stack = {v: comp[v].sel(year=years).values for v in INDICES}
-    ok = valid.copy()
-    for a in stack.values():
-        ok &= np.isfinite(a).all(0)
     sel = lambda v, span: env[v].sel(year=slice(*span)).values
     clim = env.cwd_clim.values
     layers = {v: env[v].values for v in ['cwd_clim', 'ppt_clim', 'tmx_clim']
@@ -70,6 +64,21 @@ def build_cycle(aoi, k, c, valid, allow_held_out=False):
                              - env.tmx_clim.values)
     layers['ppt_anom_dr'] = (sel('ppt', cy['drought']).mean(0)
                              / env.ppt_clim.values)
+    return layers
+
+
+def build_cycle(aoi, k, c, valid, allow_held_out=False):
+    if c == 2:
+        rc.check_cycle2(aoi, allow_held_out)
+    cy = CYCLES[c]
+    comp = xr.open_dataset(rc.E / 'landsat_composites' /
+                           f'{aoi}_{cy["variant"]}_doy182-273.nc')
+    years = list(range(cy['base'][0], cy['post'][1] + 1))
+    stack = {v: comp[v].sel(year=years).values for v in INDICES}
+    ok = valid.copy()
+    for a in stack.values():
+        ok &= np.isfinite(a).all(0)
+    layers = cycle_forcing(aoi, c)
     for v, a in stack.items():
         for i, y in enumerate(years):
             layers[f'{v}_{y}'] = a[i]

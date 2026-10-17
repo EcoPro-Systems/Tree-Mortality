@@ -14,6 +14,8 @@ verifies each member) instead of downloading the whole archive:
                                   angle NAIP made the estimates unreliable
   data/raw/mortality_names.txt    its band names
   data/processed/sites.tif        1 = SOAP, 2 = TEAK, on the same grid
+  data/processed/vardf.csv        their per-pixel model table (traits,
+                                  canopy water change pc_cwc, mortality)
   README.md
 Members are written flat into OUTPUTDIR with the Zenodo record as
 record.json.
@@ -30,7 +32,8 @@ from pathlib import Path
 
 RECORD = 'https://zenodo.org/api/records/13436293'
 MEMBERS = ('data/raw/mortality.tif', 'data/raw/mortality_names.txt',
-           'data/processed/sites.tif', 'README.md')
+           'data/processed/sites.tif', 'data/processed/vardf.csv',
+           'README.md')
 
 
 class RangeReader(io.RawIOBase):
