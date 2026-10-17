@@ -29,9 +29,11 @@ analysed the same way.
 | AVIRIS flight-line inventory | `aviris_locator/AVIRIS-{C,NG}_flight_{table.csv,s.geojson}` | [ORNL DAAC 2140](https://doi.org/10.3334/ORNLDAAC/2140) flight tables (to Aug 2024) |
 | WDTS traits and canopy water | `wdts/<aoi>_traits.nc`, `wdts/<aoi>_cwc.nc` | As before. `fetch_wdts_cwc.py` now also saves `nadir_dist`. `stanislaus` traits (Tahoe box, UTM 11) are warped onto the UTM 10 AOI grid with nearest neighbour; no canopy water there yet |
 | Geology | `env/<aoi>_geology.nc`; source in `geology/` | From `fetch_geology.py`: USGS State Geologic Map Compilation, California (1:750,000), grouped into granitic, volcanic, metamorphic, surficial and other on the 30 m grids |
-| Reflectance caches for emulated retrievals | `wdts/sim/<aoi>_refl<year>.nc`, `wdts/sim/<aoi>_refl_<yymmdd>_<product>.nc`, `wdts/sim/<aoi>_l8_<date>.nc` | From `proto_spaceborne_sim.py refl` (2013; 2018 for NEON and `sierra_nf`; 2013 for `stanislaus`), `proto_spaceborne_ts.py refl` (NEON and `sierra_nf`: 2013-05-03 and 2013-06-26 from ORNL DAAC 2391; 2018-06-22 and 2018-08-28 from ORNL DAAC 2154) and `fetch_landsat_c2_ee.py --scene` (2013-05-04, 05-20, 06-05, 06-21, 07-07, 07-23 (no clear pixels), 08-08; 2013-05-27 (no clear pixels), 06-12 and 06-28 Tahoe; 2018-06-19, 07-05, 07-21, 08-06, 08-22, 09-07) |
-| NAIP-based tree mortality (SOAP/TEAK) | `stovall2019/ALLtrees_v2.csv`; `queally2025/{mortality,sites}.tif` | From `fetch_stovall2019.py`: Stovall et al. (2019), figshare 7609193 v4 (CC BY 4.0), about 1.8 M NEON-2013 lidar crowns with NAIP 2009–2016 crown mortality. From `fetch_queally2025.py`: the 30 m grid of Queally et al. (2025), Zenodo 13436293 (CC BY 4.0), with its NAIP flight-line mask. Both save `record.json` |
+| Reflectance caches for emulated retrievals | `wdts/sim/<aoi>_refl<year>.nc`, `wdts/sim/<aoi>_refl_<yymmdd>_<product>.nc`, `wdts/sim/<aoi>_l8_<date>.nc` | From `proto_spaceborne_sim.py refl` (2013; 2018 for NEON and `sierra_nf`; 2013 for `stanislaus`), `proto_spaceborne_ts.py refl` (NEON and `sierra_nf`: 2013-05-03 and 2013-06-26 from ORNL DAAC 2391; 2018-06-22 and 2018-08-28 from ORNL DAAC 2154) and `fetch_landsat_c2_ee.py --scene` (2013-05-04, 05-20, 06-05, 06-21, 07-07, 07-23 (no clear pixels), 08-08; 2013-05-27 (no clear pixels), 06-12 and 06-28 Tahoe; 2018-06-19, 07-05, 07-21, 08-06, 08-22, 09-07; 2018-06-26 Tahoe) |
+| NAIP-based tree mortality (SOAP/TEAK) | `stovall2019/ALLtrees_v2.csv`; `queally2025/{mortality,sites}.tif`, `queally2025/vardf.csv` | From `fetch_stovall2019.py`: Stovall et al. (2019), figshare 7609193 v4 (CC BY 4.0), about 1.8 M NEON-2013 lidar crowns with NAIP 2009–2016 crown mortality. From `fetch_queally2025.py`: the 30 m grid of Queally et al. (2025), Zenodo 13436293 (CC BY 4.0), with its NAIP flight-line mask. Both save `record.json` |
 | Airborne lidar structure | `lidar/<aoi>_lidar.nc`; raw in `lidar/aso/`, `lidar/lvis2008/` | From `fetch_lidar_structure.py`: ASO 2014–17 composite (Ferraz et al. 2020) and LVIS Sep 2008 footprints on the 30 m grids. Coverage and sources: `lidar_coverage.md` |
+| Landsat-based canopy water content | `brodrick2019/<aoi>_cwc.nc`; raw in `brodrick2019/raw/` | From `fetch_brodrick2019.py`: the dry-season (Jul–Aug) 30 m CWC of Brodrick et al. (2019), PANGAEA 897276 (CC BY 4.0), for 2011, 2013, 2014 and 2015 (no 2012 map exists), with the percent changes 2011 → 2013/2014/2015. Saves `record.json` |
+| GEDI-fused annual structure | `structure/<aoi>_gedi_fusion.nc` | From `fetch_gedi_fusion.py`: unpublished annual 30 m maps extrapolating GEDI footprints wall to wall, AlphaEarth-embedding based (RH98, cover, biomass, 2018–2025) and Landsat-model based (height, 2015–2020 and 2022), for NEON, `sierra_nf` and `stanislaus`. Source paths and sizes in `structure/record.json` (§46) |
 
 ## Airborne imaging spectroscopy over the study boxes, 2018–2025 (`hls_results/airborne_coverage/`)
 
@@ -3322,6 +3324,492 @@ terciles reverses under some shuffled assignments for both targets, so
   by the disagreement at TEAK, nor by headroom: under HS, TEAK has the
   lower baseline and still the smaller gain.
 
+### 43. Canopy water and canopy density (`hls_results/water_baseline/`, `hls_results/density_strata/`)
+
+Two alternative readings of the trait gain of §2–§5. First, the 2013 traits may only
+stand in for canopy water content. Canopy water is itself retrievable,
+predicts drought mortality (Brodrick & Asner 2017; Brodrick et al. 2019),
+and covaries with leaf mass. Second, optical response metrics may saturate
+or drown in noise in dense canopies (Smith & Boers 2023), where most of
+the biomass is. Both are tested here on cycle 1, at both pilots.
+
+**Design.**
+- **Canopy-water block W** (`proto_response_traits.py --water-block`).
+  Three forms:
+  - `aviris`: the 2013 AVIRIS water retrievals already in `wdts/<aoi>_cwc.nc`
+    (EWT at 980 and 1200 nm, NDWI, the 1200 nm band depth), cross-track
+    normalized like the traits;
+  - `brodrick`: the statewide 30 m dry-season canopy water content of
+    Brodrick et al. (2019) for 2013, and its change 2011 → 2013
+    (`fetch_brodrick2019.py`);
+  - `both`: the two together.
+  - A fourth, `brodrick15`, adds the 2011 → 2015 change. That change spans
+    the drought, overlaps the resistance metric, and is shown only as a
+    bound.
+- **Ladder.** Tuned GBM, 1 km block CV, paired block-bootstrap CIs, on the
+  cells with every W column. B = Env+S (all cells) or Env+S+L (ASO; LVIS
+  2008 at NEON). Sets: B, B+W, B+T, B+Tres, B+W+T, B+W+Tres. Tres is the
+  out-of-fold residual of each trait on B; for B+W+Tres, on B+W.
+- **Targets.** NDMI and NIRv recovery, NDMI stress response, NDMI
+  resistance, and 2012–16 mortality (`mort_frac`, NEON lidar trees,
+  weighted by tree count).
+- **Structural carbon beyond W** (`proto_water_structc.py`): the §37 score
+  residualized on B and on B+W, within-stratum ρ with the response.
+- **Density terciles** (`proto_density_strata.py`). Per pilot, cells are
+  split into terciles of NLCD 2013 tree canopy cover (all cells) and of
+  ASO cover above 5 m (ASO cells). Each tercile gets its own fits and
+  folds:
+  - signal ratio: SD of the metric over the SD of its index's placebo
+    (the resistance formula applied inside 2008–11; Methods, §1);
+  - Env+S R², and Tres over Env+S and over Env+S+ASO;
+  - the structural-carbon ρ.
+- Cell counts. NEON 44,079 (Brodrick cells 44,052); `sierra_nf` 58,676
+  (58,672). Stress response: 36,646 and 55,511. Mortality: 6,866.
+
+**1. Do the traits add beyond canopy water?** (all cells; ΔR², AVIRIS /
+Brodrick / both)
+
+| Target | Area | W over Env+S | Tres over Env+S | Tres over Env+S+W |
+|---|---|---|---|---|
+| NDMI recovery | NEON | +0.021 / +0.014 / +0.029 | +0.052 | **+0.040 / +0.046 / +0.035** |
+| | `sierra_nf` | +0.019 / +0.012 / +0.030 | +0.072 | **+0.065 / +0.072 / +0.059** |
+| NIRv recovery | NEON | +0.013 / +0.016 / +0.024 | +0.041 | **+0.035 / +0.032 / +0.027** |
+| | `sierra_nf` | +0.017 / +0.015 / +0.027 | +0.070 | **+0.055 / +0.060 / +0.053** |
+| NDMI stress response | NEON | +0.013 / +0.016 / +0.025 | +0.017 | +0.010 / +0.012 / +0.008 |
+| | `sierra_nf` | +0.032 / +0.019 / +0.042 | +0.052 | +0.030 / +0.042 / +0.026 |
+| NDMI resistance | NEON | +0.010 / +0.021 / +0.034 | +0.021 | +0.014 / +0.017 / +0.007 |
+| | `sierra_nf` | +0.012 / +0.020 / +0.030 | +0.042 | +0.030 / +0.031 / +0.022 |
+| 2012–16 mortality | NEON | +0.058 / +0.026 / +0.053 | +0.054 | −0.013 † / +0.033 / +0.021 |
+
+† 95% CI includes 0; every other CI is above 0. Tres over Env+S is the
+AVIRIS-cell value; on the Brodrick cells it differs by ≤ 0.009, except
+for mortality (+0.073).
+Over fold seeds 1–3 (AVIRIS and Brodrick blocks), every W and Tres gain
+for the four response metrics stays between +0.006 and +0.078. For
+mortality, Tres over Env+S+W ranges −0.000 to +0.022 (AVIRIS) and −0.025
+to +0.042 (Brodrick), and W over Env+S +0.014 to +0.068.
+
+The raw traits lose a little more. T over Env+S+W for NDMI recovery is
++0.051 / +0.063 / +0.051 at NEON (+0.070 over Env+S) and +0.076 / +0.085 /
++0.070 at `sierra_nf` (+0.091). With the 2011 → 2015 change (`brodrick15`),
+W adds +0.058 (NEON) and +0.074 (`sierra_nf`) to resistance, as expected of
+a drought-spanning change, but Tres over Env+S+W for NDMI recovery stays
++0.045 and +0.068.
+
+**2. Beyond lidar and canopy water** (Tres over Env+S+L, then over
+Env+S+L+W; AVIRIS / Brodrick / both):
+
+| Target | NEON, ASO (29,004) | NEON, LVIS 2008 (21,826) | `sierra_nf`, ASO (48,731) |
+|---|---|---|---|
+| NDMI recovery, Tres over Env+S+L | +0.041 | +0.050 | +0.027 |
+| … over Env+S+L+W | **+0.030 / +0.038 / +0.028** | **+0.038 / +0.043 / +0.036** | **+0.021 / +0.024 / +0.024** |
+| NIRv recovery, Tres over Env+S+L | +0.058 | +0.062 | +0.035 |
+| … over Env+S+L+W | **+0.037 / +0.044 / +0.035** | **+0.049 / +0.060 / +0.049** | **+0.033 / +0.034 / +0.027** |
+| W over Env+S+L, NDMI recovery | +0.018 / +0.007 / +0.025 | +0.027 / +0.014 / +0.029 | +0.009 / +0.003 / +0.007 |
+| Mortality, Tres over Env+S+L | +0.016 † | +0.002 † | – |
+| … over Env+S+L+W | +0.011 † / +0.025 / +0.015 † | −0.010 † / −0.002 † / +0.018 † | – |
+
+Mortality cells: ASO 5,294, LVIS 3,619. Stress response and resistance
+beyond Env+S+L+W: +0.003 to +0.023, every CI above 0.
+
+**3. Structural carbon beyond canopy water** (within-stratum ρ, [95% CI]
+on B; residualized on B, then on B+W, AVIRIS / Brodrick / both):
+
+| Area, B (cells) | NDMI recovery, on B | … on B+W | NIRv recovery, on B | … on B+W | 2012–16 mortality, on B | … on B+W |
+|---|---|---|---|---|---|---|
+| NEON, Env+S (44,079; mortality 6,731) | **−0.170** [−0.198, −0.143] | −0.146 / −0.163 / −0.145 | **−0.146** [−0.176, −0.114] | −0.127 / −0.138 / −0.125 | **+0.125** [0.082, 0.164] | +0.124 / +0.126 / +0.121 |
+| NEON, Env+S+ASO (29,004; 5,166) | **−0.132** [−0.160, −0.098] | −0.110 / −0.122 / −0.106 | **−0.119** [−0.148, −0.086] | −0.107 / −0.109 / −0.099 | **+0.095** [0.042, 0.144] | +0.094 / +0.093 / +0.101 |
+| NEON, Env+S+LVIS (21,826; 3,593) | **−0.159** [−0.200, −0.117] | −0.133 / −0.154 / −0.131 | **−0.158** [−0.193, −0.116] | −0.131 / −0.149 / −0.130 | +0.044 [−0.014, 0.105] | +0.035 / +0.046 / +0.035 † |
+| `sierra_nf`, Env+S (58,676) | **−0.186** [−0.205, −0.168] | −0.173 / −0.181 / −0.172 | **−0.162** [−0.180, −0.144] | −0.157 / −0.156 / −0.155 | – | – |
+| `sierra_nf`, Env+S+ASO (48,731) | **−0.119** [−0.137, −0.100] | −0.118 / −0.118 / −0.115 | **−0.105** [−0.122, −0.085] | −0.108 / −0.099 / −0.104 | – | – |
+
+Every ρ on B+W has its CI on the same side of 0 as on B, except mortality
+beyond LVIS (†, CIs span 0 on both). On the Brodrick cells the ρ on B
+differs from the AVIRIS-cell value by ≤ 0.007.
+
+**4. Density terciles** (default fold assignment; over fold seeds 1–3 the
+ΔR² move by up to 0.021, the ρ by up to 0.010):
+
+| Area, stratifier | Tercile (cover) | Cells | Signal ratio, NDMI rec. | Env+S R² | Tres over Env+S | Tres over Env+S+ASO | Score ρ, on Env+S / Env+S+ASO |
+|---|---|---|---|---|---|---|---|
+| NEON, TCC | 1 (8–44%) | 14,752 | 1.45 | 0.73 | +0.041 | – | −0.160 / – |
+| | 2 (44–57%) | 14,746 | 2.09 | 0.60 | +0.061 | – | −0.170 / – |
+| | 3 (57–80%) | 14,581 | 2.43 | 0.48 | +0.084 | – | −0.198 / – |
+| NEON, ASO | 1 (2–83%) | 9,672 | 1.52 | 0.35 | +0.089 | +0.061 | −0.227 / −0.172 |
+| | 2 (83–93%) | 9,797 | 2.23 | 0.43 | +0.084 | +0.053 | −0.199 / −0.143 |
+| | 3 (93–100%) | 9,535 | 2.90 | 0.48 | +0.065 | **+0.038** | −0.148 / **−0.090** |
+| `sierra_nf`, TCC | 1 (4–44%) | 19,634 | 2.08 | 0.44 | +0.083 | – | −0.198 / – |
+| | 2 (44–56%) | 19,568 | 2.74 | 0.51 | +0.078 | – | −0.207 / – |
+| | 3 (56–81%) | 19,474 | 3.28 | 0.47 | +0.083 | – | −0.166 / – |
+| `sierra_nf`, ASO | 1 (6–85%) | 16,310 | 2.15 | 0.46 | +0.094 | +0.042 | −0.201 / −0.150 |
+| | 2 (85–94%) | 16,204 | 2.60 | 0.44 | +0.066 | +0.026 | −0.174 / −0.110 |
+| | 3 (94–100%) | 16,217 | 3.20 | 0.44 | +0.064 | **+0.017** | −0.173 / **−0.106** |
+
+Every ΔR² CI is above 0 and every ρ CI below 0. The densest `sierra_nf`
+tercile beyond ASO: +0.017 [0.009, 0.024], +0.017 to +0.024 over the
+seeds. The other signal ratios (NIRv recovery, both resistances) also rise
+from the first tercile to the third, at both sites under both stratifiers.
+
+**Reading.**
+- **The recovery trait gain is not canopy water.** Every form of W adds
+  0.01–0.03 to recovery, and the traits keep most of their gain beyond it:
+  Tres over Env+S+W is 0.035–0.046 at NEON and 0.053–0.072 at `sierra_nf`,
+  two-thirds or more of the gain over Env+S, and survives lidar on top
+  (0.021–0.060).
+- **For resistance and stress response, canopy water takes more.** The
+  Tres gain there shrinks by a quarter to two-thirds beyond W but stays
+  above 0.
+- **For mortality, the trait gain does not survive canopy water
+  robustly.** Beyond the AVIRIS water retrievals it is −0.013 with a CI
+  spanning 0; beyond the Brodrick maps it is +0.033 under the default
+  assignment but −0.025 to +0.042 over the other three. Beyond the NEON 2013
+  lidar trees it is already about 0 (−0.000, §46). W itself adds 0.03–0.06 to mortality over
+  Env+S, in line with Brodrick & Asner (2017).
+- **The structural-carbon direction survives canopy water.** Residual
+  lignin and cellulose still go with slower recovery beyond every form of
+  W, with and without lidar: ρ −0.10 to −0.19, every CI below 0. W takes
+  at most 0.03 of it, and nothing at `sierra_nf` beyond ASO. The link
+  with more 2012–16 mortality (§45) is untouched by W (+0.12 → +0.12).
+- **The signal does not fade in dense canopies; it strengthens.** The
+  signal ratio rises from the sparsest to the densest tercile at both
+  sites (NDMI recovery 1.5 → 2.9 at NEON, 2.2 → 3.2 at `sierra_nf` by ASO
+  cover). The sparse cells, with more soil and understory in the pixel,
+  are the noisy ones.
+- **The trait gain holds in every density tercile.** Over Env+S it is
+  flat or rising with cover. Beyond ASO it falls with cover (0.06 → 0.04
+  at NEON, 0.04 → 0.02 at `sierra_nf`) but stays above 0 in the densest
+  tercile. Lidar explains more of the response where the canopy is
+  closed.
+- **The structural-carbon direction holds in every tercile.** It is
+  weakest in the densest ASO tercile beyond lidar (−0.09, −0.11), and its
+  CI is still below 0 there.
+
+### 44. Are the held-out test cells inside the pilots' feature space? (`hls_results/aoa/`)
+
+A model trained on the pilot sites is applied to held-out cells that may
+lie outside the conditions it was trained on. This section measures that
+with the area of applicability (AOA) of Meyer & Pebesma (2021). It uses
+predictors only: no 2020–22 response of a held-out site is computed or
+read.
+
+**Design** (`proto_aoa.py`).
+- **Model.** The second-drought model of the averaged rule (§35, §39):
+  - Env+S with the 2020–22 forcing;
+  - Leg, the six cycle-1 Landsat responses;
+  - T18, the June 2018 traits, z-scored per site;
+  - L1, a June 2018 Landsat 8 scene.
+- **Training cells.** The pilots' conifer cells, pooled: 36,960 (NEON
+  18,643, `sierra_nf` 18,317), with the scene of 2018-06-19.
+- **Test cells.** The 49,442 conifer test cells of `stanislaus` (§39).
+  - Their cycle-1 responses come from `build_cycle` (cycle 1 is not
+    held out). Their 2020–22 forcing comes from the new predictors-only
+    `cycle_forcing`, which opens no Landsat composite.
+  - The pilots' scene date has no Landsat 8 scene over the Tahoe box. The
+    nearest clear one is 2018-06-26 (LC08_043033, 98.8% clear), fetched
+    with `fetch_landsat_c2_ee.py --scene`.
+  - Cells with every feature: 48,873.
+- **Weights.** Features are standardized by the training mean and SD and
+  weighted by their permutation importance in the tuned GBM fitted on the
+  pilots for 2020–22 NDMI recovery, scored on held-out 1 km blocks.
+  NIRv-recovery weights are the sensitivity check.
+- **Dissimilarity index (DI).** The weighted distance to the nearest
+  training cell over the mean pairwise training distance. For a training
+  cell, the nearest cell outside its own 1 km block fold.
+- **Threshold.** Q75 + 1.5 IQR of the training cells' DI.
+- **Feature-set variants.** Two variants drop the 2020–22 anomalies, and
+  then the climate normals as well. Both come from 4 km climate grids and
+  vary little within a 30 km site.
+- **Guard.** Every file opened through xarray, pandas or rasterio is
+  logged (`aoa_inputs.txt`), and opening a held-out site's 2017–25
+  composite or a cycle-2 table raises. The run opened 20 files: the env,
+  forest-type, trait and canopy-water files of the three sites; the
+  pilots' cycle-1 (`c2l7`) and 2017–25 (`c2oli`) composites; the Tahoe
+  box's cycle-1 composite only; and the three 2018 scenes.
+
+**Share of `stanislaus` test cells inside the AOA** (by frozen elevation
+stratum; NDMI / NIRv weights):
+
+| Features | All | q1 (low) | q2 | q3 | q4 (high) |
+|---|---|---|---|---|---|
+| Env+S+Leg+T18+L1 (the model) | 0.0 / 0.0% | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Env+S+T18+L1 (no legacy) | 0.0 / 0.0% | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| without the 2020–22 anomalies | 6.0 / 0.6% | 0 / 0 | 0 / 0 | 1.5 / 0.2 | 22.9 / 2.2 |
+| terrain, structure, Leg, T18, L1 (no climate) | **63.4 / 68.4%** | 36.6 / 39.9 | 53.7 / 60.1 | 75.9 / 83.6 | **87.9 / 90.5** |
+
+- **What puts the cells outside.** The weighted standardized difference to
+  the nearest training cell is largest for the 2020–22 precipitation
+  anomaly (0.39 of a median DI of 1.5), then elevation, the temperature
+  anomaly and the precipitation normal.
+- **The climate shift is large.** 2020–22 precipitation was 67% of normal
+  in the Tahoe box (5–95%: 65–69%), against 55–57% at the pilots. The
+  Tahoe normal (1,235–1,381 mm) also lies above the pilots' (858–1,269 mm).
+  Within a pilot the anomaly barely varies, so its training SD is tiny.
+- **Legacy is not the problem.** Dropping it changes nothing. In the
+  no-climate variant the largest differences are elevation, Leg resistance
+  and recovery, LMA and N, each small.
+- **Between droughts at the pilots** (cycle-2 Env+S+T18 against cycle-1
+  Env+S+T13 training, NDMI / NIRv weights):
+  - each pilot against itself: NEON 5.0 / 0.0%, `sierra_nf` 23.9 / 0.2%;
+  - both pilots pooled: 99.5 / 6.8%.
+
+  The 2020–22 forcing of each pilot lies inside what the two pilots
+  together saw in 2012–16, but not inside its own 2012–16.
+
+**Reading.**
+- **No `stanislaus` test cell lies inside the AOA of the pilot-trained
+  model.** The forcing puts them outside: the Tahoe box was relatively
+  wetter in 2020–22 and wetter on average than either pilot. Two pilot
+  sites give the model about two points in climate space.
+- **The stand and trait state is mostly covered.** Without the climate
+  features, 63–68% of the test cells are inside.
+- **Outside cells are in the low stratum, not the high one.** The upper
+  elevation stratum is the best covered in every variant (88–91% without
+  climate). The lowest stratum is the least (37–40%): lower-montane
+  stands of the Tahoe box have no counterpart at the pilots.
+- **Held-out results should be reported by AOA membership.** On the full
+  model that is every cell. A pooled climate range wider than two sites
+  is what would bring the test cells inside.
+
+### 45. Does slow recovery mark the trees that die in the next drought? (`hls_results/recovery_mortality/`)
+
+Trees that recovered less from earlier droughts are more likely to die in
+later ones (DeSoto et al. 2020). Remotely sensed resilience has instead
+gone with higher mortality across western US forests (Tai et al. 2023).
+This section tests both at NEON, where the lidar trees span both droughts.
+
+**Design** (`proto_recovery_mortality.py`).
+- **Target: cohort B** (`docs/hls_mortality_prototype.md`), gridded like
+  `mort_frac` (`proto_trait_dynamics.lidar_cohort(cohort='B')`).
+  - Lidar trees live in 2018 and 2019 and observed in 2021, ≥ 5 per
+    90 m cell, weighted by count.
+  - Cells are undisturbed through 2021, which removes the 2020 Creek Fire
+    burn. Without that mask the 30 m mean is 0.126 (SOAP 0.36, TEAK 0.06),
+    as reported before. With it, the 90 m cells number **8,959** (SOAP 783,
+    TEAK 8,176), weighted mean **0.071**.
+- **Base.** Env+S with the 2020–22 forcing (`cycle_forcing`), tuned GBM,
+  1 km block CV, and fold seeds 1–3 beside the default.
+- **Predictors added to the base.**
+  - Each cycle-1 Landsat NDMI response alone, then all three (C1).
+  - Cohort-A mortality (2013 → 2017–18) after C1.
+  - The residual recovery: the out-of-fold residual of cycle-1 NDMI
+    recovery on cycle-1 Env+S.
+- **Signs.** Spearman ρ of each cycle-1 response with cohort-B
+  mortality, three ways:
+  - raw;
+  - within aridity tercile × 200 m elevation strata (500 block draws);
+  - with the out-of-fold residual of mortality on the base ("partial").
+- **Structural carbon.** The score of §37 for 2013: the mean of z-scored
+  residual lignin and cellulose. Its within-stratum ρ with cohort-A
+  mortality, residualized on Env+S and on Env+S+L (each lidar source, and
+  the 2015 GEDI-fused height of §46). Run under the lidar-tree cohort (all
+  cells and the common cells) and the NAIP-based one (§41).
+
+**Recovery → next-drought mortality** (ΔR² over Env+S; default
+assignment [95% CI], then the range over fold seeds 1–3):
+
+| Added to Env+S | Both sites (8,959) | TEAK (8,176) |
+|---|---|---|
+| Env+S R² | 0.44 (0.38–0.44) | 0.26 (0.22–0.27) |
+| + NDMI recovery | +0.019 [−0.047, 0.066] (+0.008 to +0.078) | −0.008 [−0.023, 0.008] (0.000 to +0.009) |
+| + residual recovery | −0.006 [−0.034, 0.031] (−0.003 to +0.030) | −0.001 [−0.015, 0.012] |
+| + resistance / + resilience | +0.002 / −0.002 | −0.002 / −0.002 |
+| + all three (C1) | +0.023 [−0.044, 0.076] (+0.019 to +0.087) | +0.009 [−0.009, 0.025] |
+| + cohort-A mortality, after C1 | +0.010 [−0.010, 0.034] | −0.018 [−0.037, −0.002] |
+
+At SOAP (783 cells) every CI spans about −0.3 to +0.4, and the tuned base
+R² ranges from 0.13 to 0.52 across assignments. The site is too small to
+read.
+
+**Signs with cohort-B mortality** (within-stratum ρ [95% CI]; raw;
+partial on Env+S):
+
+| Cycle-1 response | Both sites | TEAK |
+|---|---|---|
+| NDMI recovery | **−0.060** [−0.112, −0.021]; +0.093; −0.063 | **−0.087** [−0.128, −0.046]; +0.029; −0.083 |
+| residual NDMI recovery | **−0.068** [−0.103, −0.034]; −0.032; −0.016 | **−0.077** [−0.106, −0.047]; −0.068; −0.048 |
+| NDMI resilience | −0.028 [−0.067, 0.013]; −0.013; −0.078 | −0.035 [−0.078, 0.004]; +0.076; −0.080 |
+| NIRv resilience | +0.022 [−0.010, 0.058]; +0.052; −0.054 | +0.027 [−0.009, 0.064]; +0.155; −0.056 |
+
+**Structural-carbon score and cohort-A mortality** (within-stratum ρ
+[95% CI]):
+
+| Residual on | HS, all (6,731) | HS, common (3,924) | Stovall, common (3,924) |
+|---|---|---|---|
+| Env+S | **+0.113** [0.062, 0.157] | **+0.119** [0.067, 0.170] | **+0.150** [0.089, 0.203] |
+| Env+S+L, NEON 2013 trees | **+0.074** [0.025, 0.121] | **+0.066** [0.010, 0.120] | **+0.103** [0.043, 0.151] |
+| Env+S+L, ASO (TEAK cells) | **+0.091** [0.045, 0.137] | **+0.101** [0.043, 0.153] | **+0.091** [0.022, 0.151] |
+| Env+S+L, LVIS 2008 | +0.040 [−0.017, 0.099] | +0.060 [−0.016, 0.141] | +0.052 [−0.044, 0.122] |
+| Env+S+L, GEDI-fused 2015 height | **+0.118** [0.068, 0.161] | **+0.130** [0.077, 0.182] | **+0.152** [0.089, 0.205] |
+
+By site on Env+S: SOAP +0.22 (HS) and +0.17 (Stovall), TEAK +0.09 and
++0.14, every CI above 0. Lignin carries more of it than cellulose (HS on
+Env+S, all cells: +0.13 vs +0.09).
+
+**Reading.**
+- **Slow recovery from 2012–16 does not predict 2020–22 death here.**
+  - No cycle-1 response adds skill to the 2020–22 base, alone or
+    together, under any fold assignment at TEAK.
+  - The pooled point estimates are positive but their CIs span 0 and move
+    between assignments.
+  - Cohort-A mortality adds nothing either: the stands that lost trees in
+    2012–16 are not the ones that lost them in 2020–22.
+- **The association has the expected sign but is weak.** Within strata,
+  cells that recovered more (or more than their environment predicts)
+  lost fewer trees in 2020–22. At TEAK the ρ is −0.08 to −0.09, with CIs
+  below 0, but too weak to add predictive skill.
+- **Resilience and mortality: positive raw, negative once environment is
+  held.** At TEAK the raw ρ is +0.08 (NDMI) and +0.16 (NIRv), the sign
+  Tai et al. report for western forests. Partial on the 2020–22
+  environment both turn negative (−0.08, −0.06). Here the positive
+  association is environmental.
+- **Structural carbon goes with more mortality.**
+  - Residual lignin and cellulose go with *higher* 2012–16 mortality under
+    both mortality products, at both sites, and beyond the NEON trees, ASO
+    and the spaceborne height. Only beyond LVIS 2008 is the CI not above 0.
+  - This is the opposite sign to the broadleaf result of Queally et al.
+    (2025), where more cellulose meant less mortality.
+  - It is the same direction as recovery (§37): the score goes with
+    slower recovery and with more death in these conifer stands.
+
+### 46. Annual GEDI-fused structure in place of lidar (`hls_results/gedi_fusion/`)
+
+Wall-to-wall structure in this pilot has been GLAD 2010 and LANDFIRE, and
+airborne lidar beats it (§5). Two unpublished sets of annual 30 m maps
+extrapolate GEDI footprints wall to wall. This section asks whether they
+can stand in for lidar.
+
+**Data** (`fetch_gedi_fusion.py`, `$E/structure/<aoi>_gedi_fusion.nc`;
+source paths and sizes in `record.json`).
+- **AEF**, 2018–2025: GEDI extrapolated with AlphaEarth Foundations
+  embeddings by gradient boosting. RH98 canopy height (m), cover (%) and
+  aboveground biomass (Mg/ha), each with an uncertainty band.
+- **LSM**, 2015–2020 and 2022: GEDI extrapolated with a Landsat model. One
+  height-like band (m; its variable is not documented and is read here as
+  canopy height).
+- Both are averaged onto the 30 m AOI grids. They cover all of
+  `neon_soap_teak`, `sierra_nf` and `stanislaus`.
+- Year-to-year noise is large. Pre-2020 structure is the 2018–19 AEF mean;
+  cycle-1 structure is the 2015 LSM map.
+
+**1. Agreement with lidar** (`proto_lidar_validation.py --gedi`,
+`gedi_agreement.csv`; 90 m, Spearman ρ, and the median of map − lidar):
+
+| Map | Lidar (years apart) | NEON | `sierra_nf` |
+|---|---|---|---|
+| AEF RH98 2018–19 | NEON 2013 tree p90 (5.5) | 0.64, −9.6 m | – |
+| | LVIS 2008 RH100 (10.5) | 0.72, −6.0 m | – |
+| | ASO RH98 (3.5 / 2.5) | **0.77**, −3.0 m | **0.74**, −2.4 m |
+| LSM 2015 | NEON 2013 tree p90 (2) | 0.47, −12.2 m | – |
+| | LVIS 2008 (7) | 0.58, −4.8 m | – |
+| | ASO RH98 (0 / −1) | 0.62, −3.5 m | 0.67, −3.6 m |
+| GLAD 2010 (reference) | NEON 2013 tree p90 | 0.56 | – |
+| | ASO RH98 | 0.67 | 0.66 |
+| AEF cover 2018–19 | ASO cover > 5 m | 0.43, −32 pts | 0.31, −36 pts |
+| TCC 2013 (reference) | ASO cover > 5 m | **0.73** | **0.75** |
+
+Cells: NEON 44,079 (ASO 29,004; LVIS 21,826; NEON trees 7,044);
+`sierra_nf` 58,676 (ASO 48,731).
+
+**2. Leakage** (`gedi_leakage.csv`; NEON lidar-tree cells, 6,866): what
+each LSM year adds to 2012–16 mortality beyond pre-drought structure
+(Env+S with TCC 2013) and beyond the NEON 2013 lidar trees.
+
+| Layer | Over Env+S | Over Env+S + NEON 2013 lidar |
+|---|---|---|
+| LSM 2015 | +0.008 [−0.002, 0.019] | +0.005 [−0.002, 0.013] |
+| LSM 2016 | **+0.045** [0.024, 0.066] | **+0.026** [0.012, 0.042] |
+
+The 2015 map does not record the die-off; the 2016 map does. Only 2015 is
+used for cycle 1.
+
+**3. Cycle 1 with spaceborne structure** (`proto_response_traits.py
+--structure gedi_lsm`, tuned GBM; L = LSM 2015 height; lidar sources on
+their own cells):
+
+| | NEON, LSM 2015 | NEON 2013 trees | LVIS 2008 | ASO | `sierra_nf`, LSM 2015 | `sierra_nf`, ASO |
+|---|---|---|---|---|---|---|
+| **NDMI recovery**: cells | 44,079 | 6,866 | 21,826 | 29,004 | 58,676 | 48,731 |
+| Env+S R² | 0.69 | 0.44 | 0.50 | 0.51 | 0.54 | 0.53 |
+| L over Env+S | +0.002 † | +0.078 | +0.086 | +0.093 | +0.001 † | +0.099 |
+| T over Env+S+L | +0.067 | +0.074 | +0.079 | +0.059 | +0.093 | +0.038 |
+| Tres over Env+S+L | **+0.052** | **+0.047** | **+0.050** | **+0.041** | **+0.077** | **+0.027** |
+| **NIRv recovery**: Env+S R² | 0.70 | 0.28 | 0.50 | 0.41 | 0.47 | 0.43 |
+| L over Env+S | +0.021 | +0.022 † | +0.052 | +0.081 | +0.001 † | +0.068 |
+| T over Env+S+L | +0.047 | +0.088 | +0.080 | +0.073 | +0.083 | +0.045 |
+| Tres over Env+S+L | **+0.036** | **+0.071** | **+0.062** | **+0.058** | **+0.075** | **+0.035** |
+| **NDMI stress response**: cells | 36,646 | 3,868 | 17,601 | 22,579 | 55,511 | 45,957 |
+| Env+S R² | 0.72 | 0.65 | 0.57 | 0.51 | 0.53 | 0.51 |
+| L over Env+S | +0.004 | +0.020 | +0.009 † | +0.044 | +0.001 † | +0.062 |
+| T over Env+S+L | +0.028 | +0.030 | +0.037 | +0.043 | +0.072 | +0.043 |
+| Tres over Env+S+L | +0.013 | +0.008 † | +0.030 | +0.037 | +0.053 | +0.031 |
+| **2012–16 mortality** (`mort_frac`): cells | 6,866 | 6,866 | 3,619 | 5,294 | – | – |
+| Env+S R² | 0.38 | 0.38 | 0.28 | 0.18 | – | – |
+| L over Env+S | +0.005 † | **+0.143** | +0.071 | +0.046 | – | – |
+| T over Env+S+L | **+0.094** | +0.010 † | +0.024 | +0.035 | – | – |
+| Tres over Env+S+L | **+0.052** | −0.000 † | +0.002 † | +0.016 † | – | – |
+
+† 95% CI includes 0. Default fold assignment; the CIs are the paired block
+bootstrap. Gains of 0.02 or less, over fold seeds 1–3: LSM height over
+Env+S −0.005 to +0.011 (NEON, NDMI targets and mortality) and −0.001 to
++0.010 (`sierra_nf`); for mortality, T over Env+S+NEON 2013
+trees +0.016 to +0.023, and Tres beyond it −0.006 to +0.006; Tres beyond
+LVIS 2008 +0.003 to +0.007. `sierra_nf` has no lidar-tree mortality
+reference, so its mortality rows are empty.
+
+**4. Second drought with AEF structure** (`proto_forward_pilot.py --rule
+--conifer-only --structure-block aef`, five fold splits; S_aef = S + the
+2018–19 AEF RH98, cover and biomass; next to the §38 conifer rule with
+wall-to-wall S):
+
+| | NEON, wall S | NEON, S_aef | `sierra_nf`, wall S | `sierra_nf`, S_aef |
+|---|---|---|---|---|
+| Leg over Env+S, NDMI rec. | +0.061 | +0.039 [0.027, 0.053] | +0.149 | +0.117 [0.099, 0.137] |
+| T18 over Env+S+Leg, NDMI rec. | +0.037 (0.025–0.048) | **+0.021** [0.015, 0.028] (0.016–0.027) | +0.026 (0.023–0.028) | **+0.018** [0.012, 0.025] (0.017–0.020) |
+| T18 over Env+S+Leg, NIRv rec. | +0.034 (0.031–0.036) | **+0.026** [0.021, 0.033] (0.014–0.031) | +0.031 (0.027–0.033) | **+0.027** [0.021, 0.035] (0.022–0.035) |
+| Score on Env+S+Leg+L1, NDMI rec. | −0.074 | **−0.067** [−0.094, −0.040] | −0.084 | **−0.075** [−0.108, −0.043] |
+| Score on Env+S+Leg+L1, NIRv rec. | −0.101 | **−0.097** [−0.124, −0.068] | −0.070 | **−0.069** [−0.100, −0.036] |
+
+(Ranges in parentheses: over the five fold splits.) The T18 gain beyond
+Env+S+Leg+L1 is not part of the rule and was not rerun with S_aef.
+
+**5. Do the annual maps register the 2020–22 die-off?** (NEON;
+`recovery_mortality/aef_loss.csv`; within-stratum ρ with cohort-B
+mortality, §45, 8,959 cells):
+
+| Change, 2019 → | AEF RH98 | AEF cover |
+|---|---|---|
+| 2022 | **−0.157** [−0.184, −0.114] | −0.064 [−0.093, −0.022] |
+| 2023 | **−0.149** [−0.183, −0.107] | +0.077 [0.043, 0.109] |
+
+At SOAP (783 cells) RH98 loss gives −0.22 and −0.31, at TEAK −0.15 and
+−0.14; every CI is below 0.
+
+**Reading.**
+- **AEF height agrees with lidar better than GLAD does** (ρ 0.74–0.77
+  against ASO, vs 0.66–0.67), and reads 2–3 m lower than ASO, partly the
+  canopy the drought removed in between. Its cover does not: TCC 2013
+  ranks ASO cover far better (0.73–0.75 vs 0.31–0.43).
+- **The 2015 Landsat-model map is a usable cycle-1 control, the 2016 map
+  is not.**
+- **For cycle 1, spaceborne structure is not a substitute for lidar.**
+  The LSM 2015 height adds at most 0.02 over Env+S (NIRv recovery at
+  NEON), against 0.05–0.10 for ASO and LVIS. The trait gain beyond it is
+  as large as beyond lidar: Tres adds 0.04–0.08 to recovery under every
+  structure source. But for mortality the NEON 2013 trees add +0.14 and
+  leave the traits nothing (Tres −0.000), while the LSM height adds
+  +0.005 and leaves the full trait gain (Tres +0.052). The traits stand in
+  for stand structure that the spaceborne map does not resolve.
+- **For the second drought, the trait statistics hold with AEF
+  structure.** T18 still adds beyond legacy at both sites for both
+  responses, every CI above 0, under every split. The gain is smaller
+  than with wall-to-wall S at NEON (NDMI +0.021 vs +0.037): AEF structure
+  takes part of it. The structural-carbon score barely moves.
+- **The annual maps record the 2020–22 die-off in height, not in cover.**
+  Cells that lost more AEF canopy height from 2019 to 2022 lost more lidar
+  trees.
+- The 2019–20 3DEP lidar reference of the same epoch is not in this
+  section.
+
 ## Summary
 
 1. **Coverage.**
@@ -3544,6 +4032,41 @@ terciles reverses under some shuffled assignments for both targets, so
     +0.060 at TEAK with the lidar-tree target, and +0.188 vs +0.038 with
     the NAIP-based one. SOAP stays ahead under every fold assignment. The
     two sites' CIs separate under the default assignment only.
+35. **The recovery trait gain is not canopy water, and it holds in dense
+    canopies** (§43). Beyond the 2013 AVIRIS water retrievals, the
+    Brodrick et al. (2019) canopy water maps, or both, residual traits add
+    +0.035 to +0.046 to NDMI recovery at NEON and +0.059 to +0.072 at
+    `sierra_nf` (+0.052 and +0.072 over Env+S), and still +0.021 to
+    +0.043 beyond lidar on top. The structural-carbon direction holds
+    beyond canopy water (ρ −0.10 to −0.19). The mortality trait gain does
+    not: beyond the AVIRIS water layers it is −0.013, CI spanning 0, and
+    beyond the Brodrick maps it ranges −0.025 to +0.042 over fold
+    assignments. The response signal strengthens with canopy cover
+    (signal ratio 1.5 → 2.9 at NEON, 2.2 → 3.2 at `sierra_nf`). The trait
+    gain and the score direction hold in the densest tercile, beyond ASO
+    too (+0.017 to +0.038).
+36. **No `stanislaus` test cell is inside the area of applicability of the
+    pilot-trained model** (§44). The 2020–22 forcing puts them outside:
+    the Tahoe box was wetter, relative to normal and in its normals, than
+    either pilot. Without the climate features 63–68% are inside, 88–91%
+    of the upper elevation stratum and 37–40% of the lowest.
+37. **Slow recovery from 2012–16 does not predict 2020–22 death at NEON**
+    (§45; 8,959 cells). No cycle-1 response adds skill to the 2020–22
+    base at TEAK under any fold assignment. Within strata the sign is as
+    expected (ρ −0.06 to −0.09) but weak. Resilience goes with more death
+    raw, the sign of Tai et al. (2023), and with less once the environment
+    is held. Residual lignin and cellulose go with more 2012–16 mortality
+    (+0.11 to +0.15) under both mortality products.
+38. **Annual GEDI-fused structure agrees with lidar but does not replace
+    it** (§46). AEF canopy height ranks ASO better than GLAD does (ρ
+    0.74–0.77 vs 0.66–0.67). The 2015 Landsat-model map is free of the
+    die-off; the 2016 map is not. As the cycle-1 structure it adds at most
+    0.02 over Env+S. The recovery trait gain beyond it matches that beyond
+    lidar, but it does not absorb the mortality trait gain the way the
+    NEON 2013 trees do (Tres +0.052 vs −0.000). With AEF structure in the
+    second-drought rule, T18 still adds +0.018 to +0.027 beyond legacy,
+    every CI above 0. AEF height loss 2019 → 2022 tracks the 2020–22 tree
+    deaths (ρ −0.16).
 
 ## Code
 
@@ -3580,7 +4103,17 @@ with `--fold-seed` and `--tag`), `proto_spaceborne_ts.py` (`refl`, `emulate`, `c
 `query_emit_coverage.py`, `fetch_stovall2019.py`, `fetch_queally2025.py`,
 `proto_stovall_check.py` (`--skip-matching`); `--mortality-source` and
 `--mortality-cells` in `proto_response_traits.py` and
-`proto_lidar_validation.py` (`response_common.mortality_target`). Run from `src/` in
+`proto_lidar_validation.py` (`response_common.mortality_target`).
+`fetch_brodrick2019.py`, `fetch_gedi_fusion.py`; `--water-block`,
+`--learner` and the `gedi_lsm` structure source in
+`proto_response_traits.py`; `proto_water_structc.py`;
+`proto_density_strata.py`; `proto_aoa.py`;
+`proto_recovery_mortality.py` (`--aef-loss`); `--gedi` in
+`proto_lidar_validation.py`; `--structure-block aef` in
+`proto_forward_pilot.py`; `proto_response_transfer.cycle_forcing` (the
+predictors of a cycle without its responses); `cohort` in
+`proto_trait_dynamics.lidar_cohort`. `response_common.ladder` fits its
+feature sets through `pmap`. Run from `src/` in
 the `ecopro` env. Earth Engine uses the Cloud project `ecopro-509818`.
 `shap` is installed with pip. Run concurrent model jobs with
 `OMP_NUM_THREADS` set so that their threads do not exceed the cores (e.g. 3
